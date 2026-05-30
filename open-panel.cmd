@@ -11,22 +11,23 @@ set "NODE_EXE=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependen
 if not exist "%NODE_EXE%" set "NODE_EXE=node"
 
 call :check_health
-if not errorlevel 1 goto open_panel
+if not errorlevel 1 goto open_existing
 
-wscript.exe //nologo "%~dp0scripts\start-panel-hidden.vbs" "%NODE_EXE%" "%~dp0"
+echo Starting AI Meta Agent panel...
+echo.
+echo Keep this window open while using the panel.
+echo Closing this window will stop http://127.0.0.1:4321.
+echo.
 
-for /l %%i in (1,1,20) do (
-  call :check_health
-  if not errorlevel 1 goto open_panel
-  timeout /t 1 /nobreak >nul
-)
+"%NODE_EXE%" src\cli.mjs server --port 4321 --open
+set "EXIT_CODE=%errorlevel%"
 
-echo AI Meta Agent panel did not become ready at %PANEL_URL%.
-echo Run run-panel.cmd to see the server error logs.
+echo.
+echo AI Meta Agent panel stopped. Exit code: %EXIT_CODE%
 pause
-exit /b 1
+exit /b %EXIT_CODE%
 
-:open_panel
+:open_existing
 start "" "%PANEL_URL%"
 exit /b 0
 
