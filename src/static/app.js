@@ -24,6 +24,12 @@ const sampleManifest = {
       sheet: "shop_pack_config"
     }
   },
+  config_roots: [
+    {
+      path: "fixtures",
+      recursive: false
+    }
+  ],
   habit_store: ".knowledge/habits.jsonl",
   ai: {
     provider: "baseai",
@@ -69,6 +75,10 @@ async function buildPayload() {
   const files = [];
   const planning = document.querySelector("#planningFile").files[0];
   const config = document.querySelector("#configFile").files[0];
+  const configDir = document.querySelector("#configDir").value.trim();
+  if (configDir) {
+    manifest.config_roots = [{ path: configDir, recursive: true }];
+  }
   if (planning) {
     files.push({ role: "planning", name: planning.name, base64: await readFileAsBase64(planning) });
   }

@@ -33,6 +33,11 @@ class ConfigTableRef(BaseModel):
     sheet: str | None = None
 
 
+class ConfigRoot(BaseModel):
+    path: str
+    recursive: bool = True
+
+
 class AiSettings(BaseModel):
     provider: str = "baseai"
     api_key_env: str = "BASEAI_API_KEY"
@@ -49,6 +54,7 @@ class Manifest(BaseModel):
     run_root: str = ".runs"
     planning_sources: list[PlanningSource]
     config_tables: dict[str, ConfigTableRef] = Field(default_factory=dict)
+    config_roots: list[ConfigRoot] = Field(default_factory=list)
     habit_store: str = ".knowledge/habits.jsonl"
     ai: AiSettings = Field(default_factory=AiSettings)
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .ai_context import build_minimal_context, summarize_analysis
+from .config_discovery import discover_config_tables
 from .draft import call_baseai, make_stub_patch
 from .habits import append_habit, habit_from_patch, load_habits, match_habits
 from .io_utils import make_run_dir, read_json, write_json, write_text
@@ -45,6 +46,7 @@ def _habit_path(base_dir: Path, manifest: Manifest) -> Path:
 def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis") -> tuple[Manifest, Any, Path, dict[str, Any]]:
     manifest = _load_manifest(manifest_path)
     schema = load_schema(_schema_path(base_dir, manifest))
+    manifest, config_discovery = discover_config_tables(manifest, schema, base_dir)
     run_dir = make_run_dir(_run_root(base_dir, manifest), label)
     workbooks = []
     source_errors = []
@@ -57,6 +59,7 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
     matched = match_habits(habits, manifest.project, list(schema.tables.keys()))
     context = build_minimal_context(manifest, schema, workbooks, matched)
     context["source_errors"] = source_errors
+    context["config_discovery"] = config_discovery
     analysis = {
         "run_dir": str(run_dir),
         "manifest": manifest.model_dump(mode="json"),
@@ -64,6 +67,7 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
         "source_errors": source_errors,
         "schema": schema.model_dump(mode="json", exclude_none=True),
         "matched_habits": [habit.model_dump(mode="json", exclude_none=True) for habit in matched],
+        "config_discovery": config_discovery,
     }
     write_json(run_dir / "analysis.json", analysis)
     write_json(run_dir / "ai-context.json", context)
@@ -165,6 +169,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         patch_path = base_dir / patch_path
     manifest = _load_manifest(manifest_path)
     schema = load_schema(_schema_path(base_dir, manifest))
+    manifest, _ = discover_config_tables(manifest, schema, base_dir)
     patch = Patch.model_validate(read_json(patch_path))
     run_dir = make_run_dir(_run_root(base_dir, manifest), "apply")
     result = apply_patch(manifest, schema, patch, base_dir, run_dir)

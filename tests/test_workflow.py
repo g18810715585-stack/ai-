@@ -139,6 +139,34 @@ class WorkflowTests(unittest.TestCase):
             matched = match_habits(habits, "unit-sample", ["shop_pack_config"])
             self.assertEqual(matched[0].habit_id, habit.habit_id)
 
+    def test_config_root_discovers_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            planning = tmp / "planning.xlsx"
+            config_dir = tmp / "configs"
+            config_dir.mkdir()
+            config = config_dir / "tables.xlsx"
+            make_planning(planning)
+            make_config(config)
+            manifest = {
+                "project": "root-sample",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "run_root": str(tmp / ".runs"),
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": str(planning), "role": "planning"}],
+                "config_roots": [{"path": str(config_dir), "recursive": True}],
+                "habit_store": str(tmp / ".knowledge" / "habits.jsonl"),
+            }
+            manifest_path = tmp / "manifest-root.json"
+            write_json(manifest_path, manifest)
+
+            manifest_model, schema, _, context = analyze_manifest(manifest_path, tmp, "analysis")
+            self.assertIn("shop_pack_config", manifest_model.config_tables)
+            self.assertIn("reward_item_config", manifest_model.config_tables)
+            self.assertEqual(context["config_discovery"]["matched"]["shop_pack_config"]["source"], "sheet_name")
+            patch = make_stub_patch(manifest_model, schema, context, str(tmp))
+            self.assertEqual([op.op for op in patch.operations], ["update", "insert"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,12 @@
       "sheet": "reward_item_config"
     }
   },
+  "config_roots": [
+    {
+      "path": "fixtures",
+      "recursive": false
+    }
+  ],
   "habit_store": ".knowledge/habits.jsonl",
   "ai": {
     "provider": "baseai",
