@@ -16,6 +16,7 @@ from ai_meta_agent.io_utils import write_json
 from ai_meta_agent.models import Manifest
 from ai_meta_agent.patch_engine import apply_patch
 from ai_meta_agent.schema import load_schema
+from ai_meta_agent.schema_scanner import scan_config_schema
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -202,6 +203,39 @@ class WorkflowTests(unittest.TestCase):
             manifest_model, _, _, context = analyze_manifest(manifest_path, tmp, "analysis")
             self.assertNotIn("shop_pack_config", manifest_model.config_tables)
             self.assertIn("shop_pack_config", context["config_discovery"]["unmatched_tables"])
+
+    def test_schema_scan_builds_schema_draft_from_sheet_names(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            config_dir = tmp / "configs"
+            config_dir.mkdir()
+            config = config_dir / "multi.xlsx"
+            make_config(config)
+            workbook = load_workbook(config)
+            note = workbook.create_sheet("说明")
+            note["A1"] = "非数据页"
+            workbook.save(config)
+            manifest = Manifest.model_validate(
+                {
+                    "project": "schema-scan-sample",
+                    "mode": "supervised_write",
+                    "schema_path": str(ROOT / "config" / "example.schema.json"),
+                    "run_root": str(tmp / ".runs"),
+                    "planning_sources": [{"id": "dummy", "kind": "local_excel", "path": str(config), "role": "planning"}],
+                    "config_roots": [{"path": str(config_dir), "recursive": True}],
+                    "habit_store": str(tmp / ".knowledge" / "habits.jsonl"),
+                }
+            )
+            run_dir = tmp / ".runs" / "schema-scan"
+            run_dir.mkdir(parents=True)
+            result = scan_config_schema(manifest, tmp, run_dir)
+            schema_draft = result["schema_draft"]
+            report = result["report"]
+            self.assertIn("shop_pack_config", schema_draft["tables"])
+            self.assertIn("reward_item_config", schema_draft["tables"])
+            self.assertIn("pack_id", schema_draft["tables"]["shop_pack_config"]["fields"])
+            self.assertTrue(any(item["name"] == "说明" for item in report["skipped_sheets"]))
+            self.assertTrue((run_dir / "schema-draft.json").exists())
 
 
 if __name__ == "__main__":

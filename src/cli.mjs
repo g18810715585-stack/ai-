@@ -47,6 +47,7 @@ function help() {
 
 Usage:
   node src/cli.mjs server [--port 4321]
+  node src/cli.mjs schema-scan --manifest fixtures/sample.manifest.json
   node src/cli.mjs analyze --manifest fixtures/sample.manifest.json
   node src/cli.mjs draft --manifest fixtures/sample.manifest.json [--stub]
   node src/cli.mjs apply --manifest fixtures/sample.manifest.json --patch .runs/latest/patch.json
@@ -66,7 +67,7 @@ async function main() {
     await startServer({ port, projectRoot, openBrowser: rest.includes("--open") });
     return 0;
   }
-  if (["analyze", "draft", "apply", "learn"].includes(command)) {
+  if (["analyze", "schema-scan", "draft", "apply", "learn"].includes(command)) {
     return runPython([command, ...rest]);
   }
   console.error(`Unknown command: ${command}`);

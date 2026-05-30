@@ -123,6 +123,8 @@ function collectArtifact(result) {
   const artifact = {};
   if (parsed.patch) artifact.patch = maybeReadJson(parsed.patch);
   if (parsed.result) artifact.result = maybeReadJson(parsed.result);
+  if (parsed.schema_draft) artifact.schemaDraft = maybeReadJson(parsed.schema_draft);
+  if (parsed.report) artifact.schemaScan = maybeReadJson(parsed.report);
   if (parsed.run_dir) {
     artifact.analysis = maybeReadJson(path.join(parsed.run_dir, "analysis.json"));
     artifact.diff = maybeReadJson(path.join(parsed.run_dir, "diff.json"));
@@ -147,6 +149,8 @@ async function handleApi(req, res, projectRoot) {
   let args;
   if (url.pathname === "/api/analyze") {
     args = ["analyze", "--manifest", manifestPath];
+  } else if (url.pathname === "/api/schema-scan") {
+    args = ["schema-scan", "--manifest", manifestPath];
   } else if (url.pathname === "/api/draft") {
     args = ["draft", "--manifest", manifestPath, ...(payload.stub === false ? [] : ["--stub"])];
   } else if (url.pathname === "/api/apply") {

@@ -125,6 +125,13 @@ document.querySelector("#analyzeBtn").addEventListener("click", async () => {
   showTab("result");
 });
 
+document.querySelector("#schemaScanBtn").addEventListener("click", async () => {
+  const payload = await buildPayload();
+  const data = await callApi("/api/schema-scan", payload);
+  resultText.textContent = JSON.stringify(data.artifact || parseStdout(data), null, 2);
+  showTab("result");
+});
+
 document.querySelector("#draftBtn").addEventListener("click", async () => {
   const payload = await buildPayload();
   payload.stub = true;

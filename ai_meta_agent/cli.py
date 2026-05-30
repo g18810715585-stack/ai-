@@ -14,6 +14,7 @@ from .io_utils import make_run_dir, read_json, write_json, write_text
 from .models import Manifest, Patch
 from .patch_engine import apply_patch
 from .schema import load_schema
+from .schema_scanner import scan_config_schema
 from .workbook_ir import load_source_ir
 
 
@@ -83,6 +84,31 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     _, _, run_dir, analysis_context = analyze_manifest(manifest_path, base_dir, "analysis")
     output = {"run_dir": str(run_dir), "source_errors": analysis_context.get("source_errors", [])}
     print(json.dumps(output, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_schema_scan(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    manifest_path = Path(args.manifest)
+    if not manifest_path.is_absolute():
+        manifest_path = base_dir / manifest_path
+    manifest = _load_manifest(manifest_path)
+    run_dir = make_run_dir(_run_root(base_dir, manifest), "schema-scan")
+    result = scan_config_schema(manifest, base_dir, run_dir, sample_limit=args.sample_rows)
+    print(
+        json.dumps(
+            {
+                "run_dir": str(run_dir),
+                "schema_draft": str(run_dir / "schema-draft.json"),
+                "report": str(run_dir / "schema-scan.json"),
+                "table_count": result["report"]["table_count"],
+                "skipped_sheets": len(result["report"]["skipped_sheets"]),
+                "errors": len(result["report"]["errors"]),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -206,6 +232,11 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = sub.add_parser("analyze")
     analyze.add_argument("--manifest", required=True)
     analyze.set_defaults(func=cmd_analyze)
+
+    schema_scan = sub.add_parser("schema-scan")
+    schema_scan.add_argument("--manifest", required=True)
+    schema_scan.add_argument("--sample-rows", type=int, default=5)
+    schema_scan.set_defaults(func=cmd_schema_scan)
 
     draft = sub.add_parser("draft")
     draft.add_argument("--manifest", required=True)
