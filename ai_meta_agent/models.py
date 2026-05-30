@@ -17,6 +17,8 @@ class PlanningSource(BaseModel):
     kind: SourceKind
     path: str | None = None
     url: str | None = None
+    sheet_id: str | None = None
+    range: str | None = None
     role: str = "planning"
 
     @model_validator(mode="after")

@@ -16,7 +16,7 @@
 日常使用最短路径：
 
 1. 双击 `open-panel.cmd`，等待浏览器自动打开。
-2. 上传“规划表 Excel”。
+2. 上传“规划表 Excel”，或在“飞书规划链接”里粘贴飞书文档/知识库表格/电子表格链接。
 3. 在“配置表目录”里填你的本地配置表根目录，例如 `C:\TopHero\Meta\meta_local`。工具会递归扫描目录里的 `.xlsx/.xlsm`，但配置表身份以 sheet 页名称为准，不按 Excel 文件名判断。
 4. 如果只是临时测试单张表，也可以上传“单张配置表 Excel”，并确认“目标配置表名”，例如 `shop_pack_config`。
 5. 第一次接入真实项目时，先点击“扫描配置目录”，生成 `schema-draft.json` 和配置表扫描报告。
@@ -98,6 +98,15 @@ draft    生成配置 patch，可调用公司 BI，也可使用 --stub 本地草
 apply    执行 patch，生成 preview、diff、validation、rollback
 learn    把人工确认或修正沉淀为习惯记录
 ```
+
+## 飞书规划链接
+
+面板里的“飞书规划链接”可以直接作为规划表输入：
+
+- 飞书电子表格或知识库里的表格链接会通过 `lark-cli sheets +read` 读取为 Workbook IR。
+- 普通飞书文档链接会通过 `lark-cli docs +fetch --api-version v2` 读取为文本规划 sheet，供后续 AI 草案使用。
+- 本地只读取飞书内容，不写回飞书，也不会覆盖远端文档。
+- 需要本机能找到 `lark-cli`，可以放在 `lark-cli-bin/lark-cli.exe`，或通过 `LARK_CLI_PATH` 指定路径，并提前完成用户授权。
 
 ## 数据边界
 

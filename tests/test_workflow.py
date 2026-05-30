@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
@@ -12,12 +13,14 @@ from openpyxl.styles import PatternFill
 
 from ai_meta_agent.cli import analyze_manifest
 from ai_meta_agent.draft import make_stub_patch
+from ai_meta_agent.feishu import FeishuSourcePayload
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
 from ai_meta_agent.io_utils import read_json, write_json
-from ai_meta_agent.models import Manifest
+from ai_meta_agent.models import Manifest, PlanningSource
 from ai_meta_agent.patch_engine import apply_patch
 from ai_meta_agent.schema import load_schema
 from ai_meta_agent.schema_scanner import scan_config_schema
+from ai_meta_agent.workbook_ir import load_source_ir
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -240,6 +243,27 @@ class WorkflowTests(unittest.TestCase):
             self.assertTrue((run_dir / "schema-draft.json").exists())
             saved_report = read_json(run_dir / "schema-scan.json")
             self.assertEqual(saved_report["tables"]["shop_pack_config"]["sample_rows"][0]["start_time"], "2026-06-01T05:00:00")
+
+    def test_feishu_sheet_source_becomes_workbook_ir(self) -> None:
+        source = PlanningSource(id="plan", kind="feishu", url="https://rivergame.feishu.cn/wiki/demo?sheet=abc", role="planning")
+        payload = FeishuSourcePayload(kind="sheet", title="飞书规划表", values=[["礼包ID", "礼包名称"], [1001, "每日礼包"]])
+        with tempfile.TemporaryDirectory() as raw, patch("ai_meta_agent.workbook_ir.read_feishu_source", return_value=payload) as reader:
+            workbook = load_source_ir(source, Path(raw))
+        reader.assert_called_once()
+        self.assertEqual(workbook.source_id, "plan")
+        self.assertEqual(workbook.sheets[0].name, "飞书规划表")
+        self.assertEqual(workbook.sheets[0].header_row, 1)
+        self.assertEqual(workbook.sheets[0].sample_rows[0]["礼包ID"], 1001)
+
+    def test_feishu_doc_source_becomes_text_sheet(self) -> None:
+        source = PlanningSource(id="doc", kind="feishu", url="https://rivergame.feishu.cn/docx/demo", role="planning")
+        payload = FeishuSourcePayload(kind="doc", title="活动规划", text="活动时间：6月1日\n奖励：金币")
+        with tempfile.TemporaryDirectory() as raw, patch("ai_meta_agent.workbook_ir.read_feishu_source", return_value=payload):
+            workbook = load_source_ir(source, Path(raw))
+        sheet = workbook.sheets[0]
+        self.assertEqual(sheet.name, "活动规划")
+        self.assertEqual(sheet.headers[:2], ["section", "content"])
+        self.assertIn("活动时间", sheet.sample_rows[0]["content"])
 
 
 if __name__ == "__main__":

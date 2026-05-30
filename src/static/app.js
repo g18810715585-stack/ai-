@@ -75,6 +75,7 @@ async function buildPayload() {
   const manifest = JSON.parse(manifestText.value);
   const files = [];
   const planning = document.querySelector("#planningFile").files[0];
+  const planningFeishuUrl = document.querySelector("#planningFeishuUrl").value.trim();
   const config = document.querySelector("#configFile").files[0];
   const configDir = document.querySelector("#configDir").value.trim();
   const targetTable = tableNameInput.value.trim();
@@ -84,7 +85,17 @@ async function buildPayload() {
   if (targetTable) {
     manifest.target_tables = [targetTable];
   }
-  if (planning) {
+  if (planningFeishuUrl) {
+    manifest.planning_sources = [
+      {
+        id: "feishu-planning",
+        kind: "feishu",
+        url: planningFeishuUrl,
+        range: "A1:ZZ1000",
+        role: "planning"
+      }
+    ];
+  } else if (planning) {
     files.push({ role: "planning", name: planning.name, base64: await readFileAsBase64(planning) });
   }
   if (config) {
