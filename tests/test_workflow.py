@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime
@@ -12,7 +13,7 @@ from openpyxl.comments import Comment
 from openpyxl.styles import PatternFill
 
 from ai_meta_agent.cli import analyze_manifest
-from ai_meta_agent.draft import make_stub_patch
+from ai_meta_agent.draft import call_baseai, make_stub_patch
 from ai_meta_agent.feishu import FeishuSourcePayload
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
 from ai_meta_agent.io_utils import read_json, write_json
@@ -264,6 +265,81 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(sheet.name, "活动规划")
         self.assertEqual(sheet.headers[:2], ["section", "content"])
         self.assertIn("活动时间", sheet.sample_rows[0]["content"])
+
+    def test_deepseek_provider_uses_openai_compatible_request(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "deepseek-sample",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx", "role": "planning"}],
+                "ai": {"provider": "deepseek_v4_pro"},
+            }
+        )
+        response_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "patch_id": "patch_deepseek",
+                                "project": "deepseek-sample",
+                                "mode": "supervised_write",
+                                "operations": [],
+                                "generated_by": "ai-meta-agent",
+                            }
+                        )
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(response_payload).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["timeout"] = timeout
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            captured["authorization"] = request.headers.get("Authorization")
+            return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as raw:
+            raw_response = Path(raw) / "ai-response.json"
+            with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "unit-key"}, clear=True):
+                with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                    generated = call_baseai(manifest, {"project": "deepseek-sample"}, raw_response)
+            self.assertTrue(raw_response.exists())
+
+        self.assertEqual(generated.patch_id, "patch_deepseek")
+        self.assertEqual(captured["url"], "https://api.deepseek.com/chat/completions")
+        self.assertEqual(captured["body"]["model"], "deepseek-v4-pro")
+        self.assertEqual(captured["body"]["thinking"], {"type": "disabled"})
+        self.assertEqual(captured["body"]["response_format"], {"type": "json_object"})
+        self.assertEqual(captured["authorization"], "Bearer unit-key")
+
+    def test_deepseek_provider_requires_its_own_key(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "deepseek-sample",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx", "role": "planning"}],
+                "ai": {"provider": "deepseek-v4-pro"},
+            }
+        )
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "DEEPSEEK_API_KEY"):
+                call_baseai(manifest, {})
 
 
 if __name__ == "__main__":

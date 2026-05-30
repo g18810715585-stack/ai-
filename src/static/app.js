@@ -6,6 +6,29 @@ const statusEl = document.querySelector("#status");
 const tableNameInput = document.querySelector("#configTableName");
 const configDirInput = document.querySelector("#configDir");
 const planningFeishuUrlInput = document.querySelector("#planningFeishuUrl");
+const aiStatusText = document.querySelector("#aiStatusText");
+const aiProviderSelect = document.querySelector("#aiProvider");
+
+const aiProviderDefaults = {
+  baseai: {
+    label: "公司 BI",
+    provider: "baseai",
+    api_key_env: "BASEAI_API_KEY",
+    base_url_env: "BASEAI_BASE_URL",
+    model_env: "BASEAI_MODEL",
+    default_base_url: "https://baseai.rivergame.net/v1",
+    default_model: "gpt-5.5"
+  },
+  deepseek_v4_pro: {
+    label: "DeepSeek V4 Pro",
+    provider: "deepseek_v4_pro",
+    api_key_env: "DEEPSEEK_API_KEY",
+    base_url_env: "DEEPSEEK_BASE_URL",
+    model_env: "DEEPSEEK_MODEL",
+    default_base_url: "https://api.deepseek.com",
+    default_model: "deepseek-v4-pro"
+  }
+};
 
 const sampleManifest = {
   project: "sample-pack",
@@ -45,6 +68,9 @@ const sampleManifest = {
 
 let lastPatch = null;
 let latestSchemaPath = localStorage.getItem("aiMetaAgent.latestSchemaPath") || "";
+let draftMode = localStorage.getItem("aiMetaAgent.draftMode") || "stub";
+let aiProvider = localStorage.getItem("aiMetaAgent.aiProvider") || "baseai";
+let latestAiStatus = null;
 
 const rememberedFields = [
   ["configDir", configDirInput],
@@ -55,6 +81,35 @@ const rememberedFields = [
 function setStatus(text, state = "") {
   statusEl.textContent = text;
   statusEl.className = `status ${state}`.trim();
+}
+
+function setDraftMode(mode) {
+  draftMode = mode === "real" ? "real" : "stub";
+  localStorage.setItem("aiMetaAgent.draftMode", draftMode);
+  for (const button of document.querySelectorAll("[data-ai-mode]")) {
+    button.classList.toggle("active", button.dataset.aiMode === draftMode);
+  }
+}
+
+function setAiProvider(provider) {
+  aiProvider = aiProviderDefaults[provider] ? provider : "baseai";
+  aiProviderSelect.value = aiProvider;
+  localStorage.setItem("aiMetaAgent.aiProvider", aiProvider);
+  latestAiStatus = null;
+  loadAiStatus();
+}
+
+function applyAiProvider(manifest) {
+  const provider = aiProviderDefaults[aiProvider] || aiProviderDefaults.baseai;
+  manifest.ai = {
+    ...(manifest.ai || {}),
+    provider: provider.provider,
+    api_key_env: provider.api_key_env,
+    base_url_env: provider.base_url_env,
+    model_env: provider.model_env,
+    default_base_url: provider.default_base_url,
+    default_model: provider.default_model
+  };
 }
 
 function showTab(name) {
@@ -81,6 +136,7 @@ function readFileAsBase64(file) {
 
 async function buildPayload() {
   const manifest = JSON.parse(manifestText.value);
+  applyAiProvider(manifest);
   const files = [];
   const planning = document.querySelector("#planningFile").files[0];
   const planningFeishuUrl = planningFeishuUrlInput.value.trim();
@@ -135,6 +191,27 @@ async function callApi(route, payload) {
   }
   setStatus("就绪");
   return data;
+}
+
+async function loadAiStatus() {
+  try {
+    const response = await fetch(`/api/ai-status?provider=${encodeURIComponent(aiProvider)}`);
+    const data = await response.json();
+    latestAiStatus = data;
+    if (data.ready) {
+      aiStatusText.textContent = `${data.provider_label} 已配置：${data.model} @ ${data.base_url}`;
+      aiStatusText.classList.remove("error");
+    } else {
+      aiStatusText.textContent = `${data.provider_label} 未配置：请在 .env 中填写 ${data.api_key_env}`;
+      aiStatusText.classList.add("error");
+    }
+    return data;
+  } catch (error) {
+    latestAiStatus = null;
+    aiStatusText.textContent = `无法检查真实 AI 配置：${error.message}`;
+    aiStatusText.classList.add("error");
+    return null;
+  }
 }
 
 function parseStdout(data) {
@@ -223,6 +300,12 @@ document.querySelector("#loadSample").addEventListener("click", () => {
   manifestText.value = JSON.stringify(sampleManifest, null, 2);
 });
 
+for (const button of document.querySelectorAll("[data-ai-mode]")) {
+  button.addEventListener("click", () => setDraftMode(button.dataset.aiMode));
+}
+
+aiProviderSelect.addEventListener("change", () => setAiProvider(aiProviderSelect.value));
+
 document.querySelector("#schemaScanBtn").addEventListener("click", () => runAction(async () => {
   const payload = await buildPayload();
   const data = await callApi("/api/schema-scan", payload);
@@ -246,7 +329,13 @@ document.querySelector("#draftBtn").addEventListener("click", () => runAction(as
     throw new Error("请先填写目标配置表名（sheet 名）");
   }
   const payload = await buildPayload();
-  payload.stub = true;
+  if (draftMode === "real") {
+    const aiStatus = latestAiStatus?.ready ? latestAiStatus : await loadAiStatus();
+    if (!aiStatus?.ready) {
+      throw new Error(aiStatus?.message || "真实 AI 未配置，请先在 .env 中填写对应 Key，或切回本地草案");
+    }
+  }
+  payload.stub = draftMode !== "real";
   const data = await callApi("/api/draft", payload);
   if (data.artifact?.patch) {
     lastPatch = data.artifact.patch;
@@ -279,5 +368,7 @@ for (const button of document.querySelectorAll(".tab")) {
 }
 
 manifestText.value = JSON.stringify(sampleManifest, null, 2);
+setAiProvider(aiProvider);
+setDraftMode(draftMode);
 restoreRememberedInputs();
 loadLatestSchema();

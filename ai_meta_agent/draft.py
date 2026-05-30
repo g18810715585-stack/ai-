@@ -2,13 +2,48 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from openpyxl import load_workbook
 
+from .io_utils import write_json, write_text
 from .models import Manifest, Patch, PatchOperation, SchemaBundle, SourceRef
+
+AI_PROVIDERS = {
+    "baseai": {
+        "label": "公司 BI",
+        "api_key_env": "BASEAI_API_KEY",
+        "base_url_env": "BASEAI_BASE_URL",
+        "model_env": "BASEAI_MODEL",
+        "default_base_url": "https://baseai.rivergame.net/v1",
+        "default_model": "gpt-5.5",
+        "extra_body": {},
+    },
+    "deepseek_v4_pro": {
+        "label": "DeepSeek V4 Pro",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "base_url_env": "DEEPSEEK_BASE_URL",
+        "model_env": "DEEPSEEK_MODEL",
+        "default_base_url": "https://api.deepseek.com",
+        "default_model": "deepseek-v4-pro",
+        "extra_body": {"thinking": {"type": "disabled"}},
+    },
+}
+
+PROVIDER_ALIASES = {
+    "baseai": "baseai",
+    "base_ai": "baseai",
+    "company_bi": "baseai",
+    "deepseek": "deepseek_v4_pro",
+    "deepseekv4pro": "deepseek_v4_pro",
+    "deepseek_v4": "deepseek_v4_pro",
+    "deepseek_v4_pro": "deepseek_v4_pro",
+    "deepseek-v4-pro": "deepseek_v4_pro",
+}
 
 
 def _coerce(value: Any, field_type: str) -> Any:
@@ -122,19 +157,43 @@ def make_stub_patch(manifest: Manifest, schema: SchemaBundle, context: dict[str,
     return Patch(patch_id=patch_id, project=manifest.project, mode=manifest.mode, operations=operations)
 
 
-def call_baseai(manifest: Manifest, context: dict[str, Any]) -> Patch:
-    api_key = os.environ.get(manifest.ai.api_key_env)
+def normalize_ai_provider(provider: str | None) -> str:
+    key = str(provider or "baseai").strip().lower().replace("-", "_")
+    return PROVIDER_ALIASES.get(key, "baseai")
+
+
+def _resolve_ai_runtime(manifest: Manifest) -> dict[str, Any]:
+    provider_id = normalize_ai_provider(manifest.ai.provider)
+    provider = dict(AI_PROVIDERS[provider_id])
+    if provider_id == "baseai":
+        provider["api_key_env"] = manifest.ai.api_key_env
+        provider["base_url_env"] = manifest.ai.base_url_env
+        provider["model_env"] = manifest.ai.model_env
+        provider["default_base_url"] = manifest.ai.default_base_url
+        provider["default_model"] = manifest.ai.default_model
+    return provider | {"id": provider_id}
+
+
+def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: Path | None = None) -> Patch:
+    runtime = _resolve_ai_runtime(manifest)
+    api_key = os.environ.get(runtime["api_key_env"])
     if not api_key:
-        raise RuntimeError(f"Missing API key env var: {manifest.ai.api_key_env}. Use --stub for local dry runs.")
-    base_url = os.environ.get(manifest.ai.base_url_env, manifest.ai.default_base_url).rstrip("/")
-    model = os.environ.get(manifest.ai.model_env, manifest.ai.default_model)
+        raise RuntimeError(f"缺少真实 AI Key：请在项目根目录 .env 里配置 {runtime['api_key_env']}=你的Key，或切回本地草案模式。")
+    base_url = os.environ.get(runtime["base_url_env"], runtime["default_base_url"]).rstrip("/")
+    model = os.environ.get(runtime["model_env"], runtime["default_model"])
     url = f"{base_url}/chat/completions"
     body = {
         "model": model,
         "messages": [
             {
                 "role": "system",
-                "content": "You are an AI meta configuration agent. Return only strict JSON matching the Patch schema.",
+                "content": (
+                    "You are an AI meta configuration agent. Return only one strict JSON object and no markdown. "
+                    "The JSON must match this Patch shape: patch_id, project, mode, operations, generated_by. "
+                    "Each operation must include op, target_table, source_ref, reason, confidence, risk_level, "
+                    "needs_confirmation, and the required match/set/rows fields for the op. "
+                    "Use only target tables and fields from schema. If no safe change can be made, return operations: []."
+                ),
             },
             {
                 "role": "user",
@@ -143,6 +202,7 @@ def call_baseai(manifest: Manifest, context: dict[str, Any]) -> Patch:
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.1,
+        **runtime["extra_body"],
     }
     request = urllib.request.Request(
         url,
@@ -150,7 +210,26 @@ def call_baseai(manifest: Manifest, context: dict[str, Any]) -> Patch:
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=120) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        message = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"{runtime['label']} 请求失败：HTTP {exc.code} {message}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"{runtime['label']} 网络连接失败：{exc.reason}") from exc
+    if raw_response_path:
+        write_json(raw_response_path, {"provider": runtime["id"], "base_url": base_url, "model": model, "response": payload})
     content = payload["choices"][0]["message"]["content"]
-    return Patch.model_validate(json.loads(content))
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError as exc:
+        if raw_response_path:
+            write_text(raw_response_path.with_name("ai-invalid-content.txt"), content)
+        raise RuntimeError(f"真实 AI 返回的内容不是合法 JSON：{exc}") from exc
+    try:
+        return Patch.model_validate(parsed)
+    except Exception as exc:
+        if raw_response_path:
+            write_json(raw_response_path.with_name("ai-invalid-patch.json"), parsed)
+        raise RuntimeError(f"真实 AI 返回的 patch 不符合 Schema：{exc}") from exc

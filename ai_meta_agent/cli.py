@@ -159,7 +159,7 @@ def cmd_draft(args: argparse.Namespace) -> int:
     if args.stub:
         patch = make_stub_patch(manifest, schema, context, str(base_dir))
     else:
-        patch = call_baseai(manifest, context)
+        patch = call_baseai(manifest, context, run_dir / "ai-response.json")
     Patch.model_validate(patch.model_dump())
     write_json(run_dir / "patch.json", patch.model_dump(mode="json", exclude_none=True))
     write_json(run_dir / "candidate-habits.json", _candidate_habits_from_patch(patch))
@@ -279,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 

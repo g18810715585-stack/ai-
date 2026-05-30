@@ -52,6 +52,23 @@
           <textarea id="manifestText" spellcheck="false"></textarea>
         </label>
 
+        <div class="mode-row">
+          <div>
+            <div class="mode-title">草案生成方式</div>
+            <div class="mode-help" id="aiStatusText">正在检查真实 AI 配置</div>
+          </div>
+          <div class="mode-controls">
+            <select id="aiProvider" aria-label="AI 服务商">
+              <option value="baseai">公司 BI</option>
+              <option value="deepseek_v4_pro">DeepSeek V4 Pro</option>
+            </select>
+            <div class="segmented" role="group" aria-label="草案生成方式">
+              <button class="segment active" data-ai-mode="stub" type="button">本地草案</button>
+              <button class="segment" data-ai-mode="real" type="button">真实 AI</button>
+            </div>
+          </div>
+        </div>
+
         <div class="actions">
           <button id="schemaScanBtn" type="button">扫描配置目录</button>
           <button id="analyzeBtn" type="button">分析表格</button>

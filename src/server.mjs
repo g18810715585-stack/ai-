@@ -7,6 +7,8 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { aiRuntimeStatus, loadDotEnv } from "./env.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const staticRoot = path.join(__dirname, "static");
 
@@ -257,6 +259,16 @@ async function handleApi(req, res, projectRoot) {
     sendJson(res, 200, { ok: true, pid: process.pid });
     return;
   }
+  if (req.method === "GET" && url.pathname === "/api/ai-status") {
+    const status = aiRuntimeStatus(process.env, { provider: url.searchParams.get("provider") });
+    sendJson(res, 200, {
+      ok: true,
+      ready: status.api_key_configured,
+      ...status,
+      message: status.api_key_configured ? `${status.provider_label} 已配置` : `未检测到 ${status.api_key_env}`
+    });
+    return;
+  }
   if (req.method === "GET" && url.pathname === "/api/latest-schema") {
     const schemaPath = latestSchemaDraft(projectRoot);
     if (!schemaPath) {
@@ -329,6 +341,7 @@ function writePidFile(projectRoot, port) {
 }
 
 export async function startServer({ port = 4321, projectRoot, openBrowser = false }) {
+  loadDotEnv(projectRoot);
   const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
       handleApi(req, res, projectRoot).catch((error) => sendJson(res, 500, { error: error.message }));
@@ -343,4 +356,5 @@ export async function startServer({ port = 4321, projectRoot, openBrowser = fals
   if (openBrowser) {
     openUrl(url);
   }
+  await new Promise((resolve) => server.once("close", resolve));
 }

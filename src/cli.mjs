@@ -5,10 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { loadDotEnv } from "./env.mjs";
 import { startServer } from "./server.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
+loadDotEnv(projectRoot);
 
 function pythonCandidates() {
   const candidates = [];
