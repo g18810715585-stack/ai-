@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "tables": {
+    "shop_pack_config": {
+      "sheet": "shop_pack_config",
+      "primary_key": ["pack_id"],
+      "overwrite_strategy": "field_level",
+      "ai_write_permission": "supervised_write",
+      "allow_update_fields": ["name", "price_id", "limit_type", "limit_count", "start_time", "end_time"],
+      "preserve_fields": ["creator", "create_time", "internal_note"],
+      "block_update_fields": ["pack_id"],
+      "fields": {
+        "pack_id": {"type": "int", "required": true},
+        "name": {"type": "str", "required": true},
+        "price_id": {"type": "int", "required": false},
+        "limit_type": {"type": "str", "required": false, "default": "daily"},
+        "limit_count": {"type": "int", "required": false, "default": 1},
+        "start_time": {"type": "str", "required": false},
+        "end_time": {"type": "str", "required": false},
+        "creator": {"type": "str", "required": false},
+        "create_time": {"type": "str", "required": false},
+        "internal_note": {"type": "str", "required": false}
+      },
+      "field_aliases": {
+        "礼包ID": "pack_id",
+        "礼包 ID": "pack_id",
+        "礼包名称": "name",
+        "名称": "name",
+        "价格ID": "price_id",
+        "价格 ID": "price_id",
+        "限购类型": "limit_type",
+        "限购次数": "limit_count",
+        "开始时间": "start_time",
+        "结束时间": "end_time"
+      }
+    },
+    "reward_item_config": {
+      "sheet": "reward_item_config",
+      "primary_key": ["reward_group_id", "item_order"],
+      "group_key": "reward_group_id",
+      "overwrite_strategy": "group_replace",
+      "ai_write_permission": "supervised_write",
+      "allow_update_fields": ["reward_group_id", "item_id", "item_count", "item_order"],
+      "preserve_fields": [],
+      "fields": {
+        "reward_group_id": {"type": "int", "required": true},
+        "item_id": {"type": "int", "required": true},
+        "item_count": {"type": "int", "required": true},
+        "item_order": {"type": "int", "required": true}
+      },
+      "field_aliases": {
+        "奖励组ID": "reward_group_id",
+        "奖励组 ID": "reward_group_id",
+        "道具ID": "item_id",
+        "道具 ID": "item_id",
+        "数量": "item_count",
+        "顺序": "item_order"
+      }
+    }
+  },
+  "risk": {
+    "auto_apply_confidence": 0.9,
+    "needs_review_confidence": 0.7,
+    "large_delete_threshold": 20,
+    "large_update_threshold": 50
+  }
+}

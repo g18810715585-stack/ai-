@@ -1,0 +1,25 @@
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+node_modules/
+npm-debug.log*
+
+.runs/
+.knowledge/
+outputs/
+uploads/
+tmp/
+
+*.local.json
+config/local.json
+
+# Real planning/config workbooks should stay local.
+*.xlsx
+*.xlsm
+!fixtures/README.md

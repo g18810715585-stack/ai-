@@ -1,0 +1,33 @@
+{
+  "project": "sample-pack",
+  "mode": "supervised_write",
+  "schema_path": "config/example.schema.json",
+  "run_root": ".runs",
+  "planning_sources": [
+    {
+      "id": "sample-planning",
+      "kind": "local_excel",
+      "path": "fixtures/sample-planning.xlsx",
+      "role": "planning"
+    }
+  ],
+  "config_tables": {
+    "shop_pack_config": {
+      "path": "fixtures/sample-config.xlsx",
+      "sheet": "shop_pack_config"
+    },
+    "reward_item_config": {
+      "path": "fixtures/sample-config.xlsx",
+      "sheet": "reward_item_config"
+    }
+  },
+  "habit_store": ".knowledge/habits.jsonl",
+  "ai": {
+    "provider": "baseai",
+    "api_key_env": "BASEAI_API_KEY",
+    "base_url_env": "BASEAI_BASE_URL",
+    "model_env": "BASEAI_MODEL",
+    "default_base_url": "https://baseai.rivergame.net/v1",
+    "default_model": "gpt-5.5"
+  }
+}
