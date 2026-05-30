@@ -10,6 +10,7 @@ export function aiProviderSettings(provider = "chatgpt", env = process.env) {
     apiKey: env[defaults.apiKeyEnv] || "",
     baseUrl: (env[defaults.baseUrlEnv] || defaults.defaultBaseUrl).replace(/\/$/, ""),
     model: env[defaults.modelEnv] || defaults.defaultModel,
+    temperature: providerId === "claude" ? null : 0.1,
     extraBody: {}
   };
 }
@@ -42,7 +43,7 @@ export async function callAiJson(context, { provider = "chatgpt", env = process.
         }
       ],
       response_format: { type: "json_object" },
-      temperature: 0.1,
+      ...(settings.temperature === null ? {} : { temperature: settings.temperature }),
       ...settings.extraBody
     })
   });

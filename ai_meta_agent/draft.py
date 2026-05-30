@@ -22,6 +22,7 @@ AI_PROVIDERS = {
         "default_base_url": "https://baseai.rivergame.net/v1",
         "default_model": "gpt-5.5",
         "extra_body": {},
+        "temperature": 0.1,
     },
     "gemini": {
         "label": "Gemini",
@@ -31,6 +32,7 @@ AI_PROVIDERS = {
         "default_base_url": "https://baseai.rivergame.net/v1",
         "default_model": "gemini-3.1-pro-preview",
         "extra_body": {},
+        "temperature": 0.1,
     },
     "claude": {
         "label": "Claude",
@@ -40,6 +42,7 @@ AI_PROVIDERS = {
         "default_base_url": "https://baseai.rivergame.net/v1",
         "default_model": "claude-opus-4-8",
         "extra_body": {},
+        "temperature": None,
     },
     "deepseek_v4_pro": {
         "label": "DeepSeek",
@@ -49,6 +52,7 @@ AI_PROVIDERS = {
         "default_base_url": "https://baseai.rivergame.net/v1",
         "default_model": "deepseek-v4-pro",
         "extra_body": {},
+        "temperature": 0.1,
     },
 }
 
@@ -220,9 +224,10 @@ def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: 
             },
         ],
         "response_format": {"type": "json_object"},
-        "temperature": 0.1,
         **runtime["extra_body"],
     }
+    if runtime["temperature"] is not None:
+        body["temperature"] = runtime["temperature"]
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),

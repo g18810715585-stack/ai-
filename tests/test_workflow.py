@@ -322,6 +322,9 @@ class WorkflowTests(unittest.TestCase):
 
         self.assertEqual([item["body"]["model"] for item in captured], list(providers.values()))
         self.assertTrue(all(item["url"] == "https://baseai.rivergame.net/v1/chat/completions" for item in captured))
+        self.assertIn("temperature", captured[0]["body"])
+        self.assertIn("temperature", captured[1]["body"])
+        self.assertNotIn("temperature", captured[2]["body"])
 
     def test_deepseek_provider_uses_company_bi_request(self) -> None:
         manifest = Manifest.model_validate(
