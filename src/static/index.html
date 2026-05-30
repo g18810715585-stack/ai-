@@ -3,16 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AI Meta Agent</title>
+    <title>AI 配表代理人</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header class="topbar">
       <div>
-        <h1>AI Meta Agent</h1>
-        <p>配表 patch、diff、校验、回滚和习惯沉淀</p>
+        <h1>AI 配表代理人</h1>
+        <p>读取规划表，生成可审核的配置变更、预览表、校验报告和习惯记录</p>
       </div>
-      <div class="status" id="status">Ready</div>
+      <div class="status" id="status">就绪</div>
     </header>
 
     <main class="layout">
@@ -33,28 +33,28 @@
         </label>
 
         <label>
-          配置表名
+          目标配置表名
           <input id="configTableName" value="shop_pack_config" />
         </label>
 
         <label>
-          Manifest
+          运行配置 Manifest
           <textarea id="manifestText" spellcheck="false"></textarea>
         </label>
 
         <div class="actions">
-          <button id="analyzeBtn" type="button">Analyze</button>
-          <button id="draftBtn" type="button">Draft</button>
-          <button id="applyBtn" type="button">Apply Preview</button>
-          <button id="learnBtn" type="button">Learn</button>
+          <button id="analyzeBtn" type="button">分析表格</button>
+          <button id="draftBtn" type="button">生成草案</button>
+          <button id="applyBtn" type="button">生成预览</button>
+          <button id="learnBtn" type="button">记录习惯</button>
         </div>
       </section>
 
       <section class="panel review-panel">
         <div class="tabs">
-          <button class="tab active" data-tab="patch">Patch</button>
-          <button class="tab" data-tab="result">Result</button>
-          <button class="tab" data-tab="raw">Raw</button>
+          <button class="tab active" data-tab="patch">变更 Patch</button>
+          <button class="tab" data-tab="result">执行结果</button>
+          <button class="tab" data-tab="raw">原始响应</button>
         </div>
 
         <div id="patchTab" class="tab-content active">

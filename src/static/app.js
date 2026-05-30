@@ -79,7 +79,7 @@ async function buildPayload() {
 }
 
 async function callApi(route, payload) {
-  setStatus("Running", "busy");
+  setStatus("处理中", "busy");
   const response = await fetch(route, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -88,11 +88,11 @@ async function callApi(route, payload) {
   const data = await response.json();
   rawText.textContent = JSON.stringify(data, null, 2);
   if (!response.ok) {
-    setStatus("Error", "error");
+    setStatus("出错", "error");
     showTab("raw");
-    throw new Error(data.error || data.stderr || "request failed");
+    throw new Error(data.error || data.stderr || "请求失败");
   }
-  setStatus("Ready");
+  setStatus("就绪");
   return data;
 }
 
@@ -139,7 +139,7 @@ document.querySelector("#learnBtn").addEventListener("click", async () => {
   const payload = await buildPayload();
   payload.patch = JSON.parse(patchText.value || JSON.stringify(lastPatch || {}));
   payload.decision = "accepted";
-  payload.note = "accepted from local panel";
+  payload.note = "从本地面板确认通过";
   const data = await callApi("/api/learn", payload);
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   showTab("result");
