@@ -67,6 +67,12 @@ function materializeRequest(projectRoot, payload) {
   const uploadRoot = path.join(projectRoot, ".runs", `upload-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`);
   fs.mkdirSync(uploadRoot, { recursive: true });
   const manifest = payload.manifest || {};
+  if (payload.useLatestSchema) {
+    const latestSchema = latestSchemaDraft(projectRoot);
+    if (latestSchema) {
+      manifest.schema_path = latestSchema;
+    }
+  }
   const files = payload.files || [];
   for (const file of files) {
     const safeName = path.basename(file.name || `${file.role || "upload"}.xlsx`);
@@ -111,6 +117,26 @@ function runCore(projectRoot, args) {
 function maybeReadJson(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return null;
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function latestSchemaDraft(projectRoot) {
+  const runsDir = path.join(projectRoot, ".runs");
+  const pointer = path.join(runsDir, "LATEST_SCHEMA_DRAFT.txt");
+  if (fs.existsSync(pointer)) {
+    const value = fs.readFileSync(pointer, "utf8").trim();
+    if (value && fs.existsSync(value)) return value;
+  }
+  if (!fs.existsSync(runsDir)) return null;
+  const candidates = fs.readdirSync(runsDir, { withFileTypes: true })
+    .filter((item) => item.isDirectory() && item.name.startsWith("schema-scan-"))
+    .map((item) => {
+      const filePath = path.join(runsDir, item.name, "schema-draft.json");
+      const stat = fs.existsSync(filePath) ? fs.statSync(filePath) : null;
+      return stat ? { filePath, time: stat.mtimeMs } : null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.time - left.time);
+  return candidates[0]?.filePath || null;
 }
 
 function countBy(items, field) {
@@ -163,6 +189,47 @@ function summarizeSchemaScan(filePath) {
   };
 }
 
+function summarizeAnalysis(filePath) {
+  const data = maybeReadJson(filePath);
+  if (!data) return null;
+  const schemaTables = Object.keys(data.schema?.tables || {}).sort();
+  const discovery = data.config_discovery || {};
+  return {
+    path: filePath,
+    run_dir: data.run_dir,
+    project: data.manifest?.project,
+    schema_path: data.manifest?.schema_path,
+    target_tables: data.manifest?.target_tables || [],
+    schema_table_count: schemaTables.length,
+    schema_tables: schemaTables.slice(0, 80),
+    omitted_schema_tables: Math.max(0, schemaTables.length - 80),
+    workbook_count: (data.workbooks || []).length,
+    workbooks: (data.workbooks || []).map((workbook) => ({
+      source_id: workbook.source_id,
+      path: workbook.path,
+      sheet_count: (workbook.sheets || []).length,
+      sheets: (workbook.sheets || []).slice(0, 20).map((sheet) => ({
+        name: sheet.name,
+        max_row: sheet.max_row,
+        max_column: sheet.max_column,
+        header_row: sheet.header_row,
+        headers: (sheet.headers || []).filter(Boolean).slice(0, 40)
+      }))
+    })),
+    source_errors: data.source_errors || [],
+    config_discovery: {
+      roots: discovery.roots || [],
+      matched_count: Object.keys(discovery.matched || {}).length,
+      unmatched_count: (discovery.unmatched_tables || []).length,
+      unmatched_tables: (discovery.unmatched_tables || []).slice(0, 80),
+      skipped_count: (discovery.skipped_sheets || []).length,
+      error_count: (discovery.errors || []).length,
+      errors: discovery.errors || []
+    },
+    matched_habit_count: (data.matched_habits || []).length
+  };
+}
+
 function collectArtifact(result) {
   let parsed = {};
   try {
@@ -176,7 +243,7 @@ function collectArtifact(result) {
   if (parsed.schema_draft) artifact.schemaDraft = summarizeSchemaDraft(parsed.schema_draft);
   if (parsed.report) artifact.schemaScan = summarizeSchemaScan(parsed.report);
   if (parsed.run_dir) {
-    artifact.analysis = maybeReadJson(path.join(parsed.run_dir, "analysis.json"));
+    artifact.analysis = summarizeAnalysis(path.join(parsed.run_dir, "analysis.json"));
     artifact.diff = maybeReadJson(path.join(parsed.run_dir, "diff.json"));
     artifact.validation = maybeReadJson(path.join(parsed.run_dir, "validation.json"));
     artifact.rollback = maybeReadJson(path.join(parsed.run_dir, "rollback-patch.json"));
@@ -188,6 +255,16 @@ async function handleApi(req, res, projectRoot) {
   const url = new URL(req.url, "http://127.0.0.1");
   if (url.pathname === "/api/health") {
     sendJson(res, 200, { ok: true, pid: process.pid });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/latest-schema") {
+    const schemaPath = latestSchemaDraft(projectRoot);
+    if (!schemaPath) {
+      sendJson(res, 404, { error: "no schema scan found" });
+      return;
+    }
+    const schema = summarizeSchemaDraft(schemaPath);
+    sendJson(res, 200, { schema_path: schemaPath, schema });
     return;
   }
   if (req.method !== "POST") {

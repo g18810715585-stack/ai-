@@ -42,6 +42,7 @@ const sampleManifest = {
 };
 
 let lastPatch = null;
+let latestSchemaPath = localStorage.getItem("aiMetaAgent.latestSchemaPath") || "";
 
 function setStatus(text, state = "") {
   statusEl.textContent = text;
@@ -76,16 +77,20 @@ async function buildPayload() {
   const planning = document.querySelector("#planningFile").files[0];
   const config = document.querySelector("#configFile").files[0];
   const configDir = document.querySelector("#configDir").value.trim();
+  const targetTable = tableNameInput.value.trim();
   if (configDir) {
     manifest.config_roots = [{ path: configDir, recursive: true }];
+  }
+  if (targetTable) {
+    manifest.target_tables = [targetTable];
   }
   if (planning) {
     files.push({ role: "planning", name: planning.name, base64: await readFileAsBase64(planning) });
   }
   if (config) {
-    files.push({ role: `config:${tableNameInput.value.trim() || "shop_pack_config"}`, name: config.name, base64: await readFileAsBase64(config) });
+    files.push({ role: `config:${targetTable || "shop_pack_config"}`, name: config.name, base64: await readFileAsBase64(config) });
   }
-  return { manifest, files };
+  return { manifest, files, useLatestSchema: Boolean(latestSchemaPath) };
 }
 
 async function callApi(route, payload) {
@@ -130,6 +135,30 @@ function compactSchemaResult(data) {
   };
 }
 
+function rememberSchemaPath(schemaPath) {
+  if (!schemaPath) return;
+  latestSchemaPath = schemaPath;
+  localStorage.setItem("aiMetaAgent.latestSchemaPath", schemaPath);
+  try {
+    const manifest = JSON.parse(manifestText.value);
+    manifest.schema_path = schemaPath;
+    manifestText.value = JSON.stringify(manifest, null, 2);
+  } catch {
+    // Leave invalid manual edits visible so the user can correct them.
+  }
+}
+
+async function loadLatestSchema() {
+  try {
+    const response = await fetch("/api/latest-schema");
+    if (!response.ok) return;
+    const data = await response.json();
+    rememberSchemaPath(data.schema_path);
+  } catch {
+    // The first run may not have a schema scan yet.
+  }
+}
+
 async function runAction(action) {
   try {
     await action();
@@ -139,17 +168,24 @@ async function runAction(action) {
 }
 
 document.querySelector("#loadSample").addEventListener("click", () => {
+  latestSchemaPath = "";
+  localStorage.removeItem("aiMetaAgent.latestSchemaPath");
+  tableNameInput.value = "shop_pack_config";
   manifestText.value = JSON.stringify(sampleManifest, null, 2);
 });
 
 document.querySelector("#schemaScanBtn").addEventListener("click", () => runAction(async () => {
   const payload = await buildPayload();
   const data = await callApi("/api/schema-scan", payload);
+  rememberSchemaPath(data.artifact?.schemaDraft?.path || parseStdout(data).schema_draft);
   resultText.textContent = JSON.stringify(compactSchemaResult(data), null, 2);
   showTab("result");
 }));
 
 document.querySelector("#analyzeBtn").addEventListener("click", () => runAction(async () => {
+  if (!tableNameInput.value.trim()) {
+    throw new Error("请先填写目标配置表名（sheet 名）");
+  }
   const payload = await buildPayload();
   const data = await callApi("/api/analyze", payload);
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
@@ -157,6 +193,9 @@ document.querySelector("#analyzeBtn").addEventListener("click", () => runAction(
 }));
 
 document.querySelector("#draftBtn").addEventListener("click", () => runAction(async () => {
+  if (!tableNameInput.value.trim()) {
+    throw new Error("请先填写目标配置表名（sheet 名）");
+  }
   const payload = await buildPayload();
   payload.stub = true;
   const data = await callApi("/api/draft", payload);
@@ -191,3 +230,4 @@ for (const button of document.querySelectorAll(".tab")) {
 }
 
 manifestText.value = JSON.stringify(sampleManifest, null, 2);
+loadLatestSchema();

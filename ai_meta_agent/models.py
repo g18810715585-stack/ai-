@@ -55,6 +55,7 @@ class Manifest(BaseModel):
     planning_sources: list[PlanningSource]
     config_tables: dict[str, ConfigTableRef] = Field(default_factory=dict)
     config_roots: list[ConfigRoot] = Field(default_factory=list)
+    target_tables: list[str] = Field(default_factory=list)
     habit_store: str = ".knowledge/habits.jsonl"
     ai: AiSettings = Field(default_factory=AiSettings)
 

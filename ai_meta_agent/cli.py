@@ -44,9 +44,22 @@ def _habit_path(base_dir: Path, manifest: Manifest) -> Path:
     return path
 
 
+def _targeted_schema(schema: Any, manifest: Manifest) -> Any:
+    if not manifest.target_tables:
+        return schema
+    selected = {name: schema.tables[name] for name in manifest.target_tables if name in schema.tables}
+    if not selected:
+        available = ", ".join(sorted(schema.tables.keys())[:20])
+        raise ValueError(f"Target table(s) not found in schema: {', '.join(manifest.target_tables)}. Available examples: {available}")
+    schema = schema.model_copy(deep=True)
+    schema.tables = selected
+    return schema
+
+
 def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis") -> tuple[Manifest, Any, Path, dict[str, Any]]:
     manifest = _load_manifest(manifest_path)
     schema = load_schema(_schema_path(base_dir, manifest))
+    schema = _targeted_schema(schema, manifest)
     manifest, config_discovery = discover_config_tables(manifest, schema, base_dir)
     run_dir = make_run_dir(_run_root(base_dir, manifest), label)
     workbooks = []
@@ -95,6 +108,8 @@ def cmd_schema_scan(args: argparse.Namespace) -> int:
     manifest = _load_manifest(manifest_path)
     run_dir = make_run_dir(_run_root(base_dir, manifest), "schema-scan")
     result = scan_config_schema(manifest, base_dir, run_dir, sample_limit=args.sample_rows)
+    write_text(_run_root(base_dir, manifest) / "LATEST_SCHEMA_SCAN.txt", str(run_dir.resolve()))
+    write_text(_run_root(base_dir, manifest) / "LATEST_SCHEMA_DRAFT.txt", str((run_dir / "schema-draft.json").resolve()))
     print(
         json.dumps(
             {
@@ -195,6 +210,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         patch_path = base_dir / patch_path
     manifest = _load_manifest(manifest_path)
     schema = load_schema(_schema_path(base_dir, manifest))
+    schema = _targeted_schema(schema, manifest)
     manifest, _ = discover_config_tables(manifest, schema, base_dir)
     patch = Patch.model_validate(read_json(patch_path))
     run_dir = make_run_dir(_run_root(base_dir, manifest), "apply")
@@ -261,7 +277,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
