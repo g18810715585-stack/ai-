@@ -4,6 +4,8 @@ const resultText = document.querySelector("#resultText");
 const rawText = document.querySelector("#rawText");
 const statusEl = document.querySelector("#status");
 const tableNameInput = document.querySelector("#configTableName");
+const configDirInput = document.querySelector("#configDir");
+const planningFeishuUrlInput = document.querySelector("#planningFeishuUrl");
 
 const sampleManifest = {
   project: "sample-pack",
@@ -44,6 +46,12 @@ const sampleManifest = {
 let lastPatch = null;
 let latestSchemaPath = localStorage.getItem("aiMetaAgent.latestSchemaPath") || "";
 
+const rememberedFields = [
+  ["configDir", configDirInput],
+  ["targetTable", tableNameInput],
+  ["planningFeishuUrl", planningFeishuUrlInput]
+];
+
 function setStatus(text, state = "") {
   statusEl.textContent = text;
   statusEl.className = `status ${state}`.trim();
@@ -75,10 +83,11 @@ async function buildPayload() {
   const manifest = JSON.parse(manifestText.value);
   const files = [];
   const planning = document.querySelector("#planningFile").files[0];
-  const planningFeishuUrl = document.querySelector("#planningFeishuUrl").value.trim();
+  const planningFeishuUrl = planningFeishuUrlInput.value.trim();
   const config = document.querySelector("#configFile").files[0];
-  const configDir = document.querySelector("#configDir").value.trim();
+  const configDir = configDirInput.value.trim();
   const targetTable = tableNameInput.value.trim();
+  saveRememberedInputs();
   if (configDir) {
     manifest.config_roots = [{ path: configDir, recursive: true }];
   }
@@ -178,6 +187,35 @@ async function runAction(action) {
   }
 }
 
+function storageKey(name) {
+  return `aiMetaAgent.${name}`;
+}
+
+function saveRememberedInputs() {
+  for (const [name, input] of rememberedFields) {
+    const value = input.value.trim();
+    if (value) {
+      localStorage.setItem(storageKey(name), value);
+    } else {
+      localStorage.removeItem(storageKey(name));
+    }
+  }
+}
+
+function restoreRememberedInputs() {
+  for (const [name, input] of rememberedFields) {
+    const value = localStorage.getItem(storageKey(name));
+    if (value) {
+      input.value = value;
+    }
+  }
+}
+
+for (const [, input] of rememberedFields) {
+  input.addEventListener("input", saveRememberedInputs);
+  input.addEventListener("change", saveRememberedInputs);
+}
+
 document.querySelector("#loadSample").addEventListener("click", () => {
   latestSchemaPath = "";
   localStorage.removeItem("aiMetaAgent.latestSchemaPath");
@@ -241,4 +279,5 @@ for (const button of document.querySelectorAll(".tab")) {
 }
 
 manifestText.value = JSON.stringify(sampleManifest, null, 2);
+restoreRememberedInputs();
 loadLatestSchema();
