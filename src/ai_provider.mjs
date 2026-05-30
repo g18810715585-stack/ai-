@@ -10,7 +10,7 @@ export function aiProviderSettings(provider = "chatgpt", env = process.env) {
     apiKey: env[defaults.apiKeyEnv] || "",
     baseUrl: (env[defaults.baseUrlEnv] || defaults.defaultBaseUrl).replace(/\/$/, ""),
     model: env[defaults.modelEnv] || defaults.defaultModel,
-    extraBody: providerId === "deepseek_v4_pro" ? { thinking: { type: "disabled" } } : {}
+    extraBody: {}
   };
 }
 

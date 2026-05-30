@@ -323,7 +323,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual([item["body"]["model"] for item in captured], list(providers.values()))
         self.assertTrue(all(item["url"] == "https://baseai.rivergame.net/v1/chat/completions" for item in captured))
 
-    def test_deepseek_provider_uses_openai_compatible_request(self) -> None:
+    def test_deepseek_provider_uses_company_bi_request(self) -> None:
         manifest = Manifest.model_validate(
             {
                 "project": "deepseek-sample",
@@ -372,19 +372,19 @@ class WorkflowTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as raw:
             raw_response = Path(raw) / "ai-response.json"
-            with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "unit-key"}, clear=True):
+            with patch.dict(os.environ, {"BASEAI_API_KEY": "unit-key"}, clear=True):
                 with patch("urllib.request.urlopen", side_effect=fake_urlopen):
                     generated = call_baseai(manifest, {"project": "deepseek-sample"}, raw_response)
             self.assertTrue(raw_response.exists())
 
         self.assertEqual(generated.patch_id, "patch_deepseek")
-        self.assertEqual(captured["url"], "https://api.deepseek.com/chat/completions")
+        self.assertEqual(captured["url"], "https://baseai.rivergame.net/v1/chat/completions")
         self.assertEqual(captured["body"]["model"], "deepseek-v4-pro")
-        self.assertEqual(captured["body"]["thinking"], {"type": "disabled"})
+        self.assertNotIn("thinking", captured["body"])
         self.assertEqual(captured["body"]["response_format"], {"type": "json_object"})
         self.assertEqual(captured["authorization"], "Bearer unit-key")
 
-    def test_deepseek_provider_requires_its_own_key(self) -> None:
+    def test_deepseek_provider_requires_company_bi_key(self) -> None:
         manifest = Manifest.model_validate(
             {
                 "project": "deepseek-sample",
@@ -395,7 +395,7 @@ class WorkflowTests(unittest.TestCase):
             }
         )
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, "DEEPSEEK_API_KEY"):
+            with self.assertRaisesRegex(RuntimeError, "BASEAI_API_KEY"):
                 call_baseai(manifest, {})
 
 

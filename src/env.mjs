@@ -32,10 +32,10 @@ export const AI_PROVIDERS = {
   deepseek_v4_pro: {
     id: "deepseek_v4_pro",
     label: "DeepSeek",
-    apiKeyEnv: "DEEPSEEK_API_KEY",
-    baseUrlEnv: "DEEPSEEK_BASE_URL",
+    apiKeyEnv: "BASEAI_API_KEY",
+    baseUrlEnv: "BASEAI_BASE_URL",
     modelEnv: "DEEPSEEK_MODEL",
-    defaultBaseUrl: "https://api.deepseek.com",
+    defaultBaseUrl: "https://baseai.rivergame.net/v1",
     defaultModel: "deepseek-v4-pro"
   }
 };

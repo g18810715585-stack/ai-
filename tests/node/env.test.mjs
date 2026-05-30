@@ -22,13 +22,13 @@ DEEPSEEK_MODEL=deepseek-v4-pro # local note
 
 test("loadDotEnv does not override existing process values", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-meta-agent-env-"));
-  fs.writeFileSync(path.join(dir, ".env"), "TEST_API_KEY=from-file\nDEEPSEEK_API_KEY=from-file\n", "utf8");
+  fs.writeFileSync(path.join(dir, ".env"), "TEST_API_KEY=from-file\nTHIRD_API_KEY=from-file\n", "utf8");
   const env = { TEST_API_KEY: "from-env" };
   const result = loadDotEnv(dir, env);
   assert.equal(result.found, true);
   assert.equal(env.TEST_API_KEY, "from-env");
-  assert.equal(env.DEEPSEEK_API_KEY, "from-file");
-  assert.deepEqual(result.loaded, ["DEEPSEEK_API_KEY"]);
+  assert.equal(env.THIRD_API_KEY, "from-file");
+  assert.deepEqual(result.loaded, ["THIRD_API_KEY"]);
   assert.deepEqual(result.skipped, ["TEST_API_KEY"]);
 });
 
@@ -37,6 +37,7 @@ test("aiRuntimeStatus resolves company BI model choices", () => {
   const chatgpt = aiRuntimeStatus(env, { provider: "chatgpt" });
   const gemini = aiRuntimeStatus(env, { provider: "gemini" });
   const claude = aiRuntimeStatus(env, { provider: "claude" });
+  const deepseek = aiRuntimeStatus(env, { provider: "deepseek-v4-pro" });
   assert.equal(normalizeAiProvider("baseai"), "chatgpt");
   assert.equal(chatgpt.provider_label, "ChatGPT");
   assert.equal(chatgpt.api_key_env, "BASEAI_API_KEY");
@@ -45,16 +46,9 @@ test("aiRuntimeStatus resolves company BI model choices", () => {
   assert.equal(gemini.model, "gemini-3.1-pro-preview");
   assert.equal(claude.provider_label, "Claude");
   assert.equal(claude.model, "claude-opus-4-8");
-  assert.equal(claude.api_key_configured, true);
-});
-
-test("aiRuntimeStatus resolves DeepSeek defaults", () => {
-  const status = aiRuntimeStatus({ DEEPSEEK_API_KEY: "test" }, { provider: "deepseek-v4-pro" });
-  assert.equal(normalizeAiProvider("deepseek-v4-pro"), "deepseek_v4_pro");
-  assert.equal(status.provider, "deepseek_v4_pro");
-  assert.equal(status.provider_label, "DeepSeek");
-  assert.equal(status.api_key_env, "DEEPSEEK_API_KEY");
-  assert.equal(status.base_url, "https://api.deepseek.com");
-  assert.equal(status.model, "deepseek-v4-pro");
-  assert.equal(status.api_key_configured, true);
+  assert.equal(deepseek.provider_label, "DeepSeek");
+  assert.equal(deepseek.api_key_env, "BASEAI_API_KEY");
+  assert.equal(deepseek.base_url, "https://baseai.rivergame.net/v1");
+  assert.equal(deepseek.model, "deepseek-v4-pro");
+  assert.equal(deepseek.api_key_configured, true);
 });

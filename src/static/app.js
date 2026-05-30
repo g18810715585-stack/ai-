@@ -40,10 +40,10 @@ const aiProviderDefaults = {
   deepseek_v4_pro: {
     label: "DeepSeek",
     provider: "deepseek_v4_pro",
-    api_key_env: "DEEPSEEK_API_KEY",
-    base_url_env: "DEEPSEEK_BASE_URL",
+    api_key_env: "BASEAI_API_KEY",
+    base_url_env: "BASEAI_BASE_URL",
     model_env: "DEEPSEEK_MODEL",
-    default_base_url: "https://api.deepseek.com",
+    default_base_url: "https://baseai.rivergame.net/v1",
     default_model: "deepseek-v4-pro"
   }
 };
