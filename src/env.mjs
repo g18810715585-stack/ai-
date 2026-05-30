@@ -2,18 +2,36 @@ import fs from "node:fs";
 import path from "node:path";
 
 export const AI_PROVIDERS = {
-  baseai: {
-    id: "baseai",
-    label: "公司 BI",
+  chatgpt: {
+    id: "chatgpt",
+    label: "ChatGPT",
     apiKeyEnv: "BASEAI_API_KEY",
     baseUrlEnv: "BASEAI_BASE_URL",
-    modelEnv: "BASEAI_MODEL",
+    modelEnv: "CHATGPT_MODEL",
     defaultBaseUrl: "https://baseai.rivergame.net/v1",
     defaultModel: "gpt-5.5"
   },
+  gemini: {
+    id: "gemini",
+    label: "Gemini",
+    apiKeyEnv: "BASEAI_API_KEY",
+    baseUrlEnv: "BASEAI_BASE_URL",
+    modelEnv: "GEMINI_MODEL",
+    defaultBaseUrl: "https://baseai.rivergame.net/v1",
+    defaultModel: "gemini-3.1-pro-preview"
+  },
+  claude: {
+    id: "claude",
+    label: "Claude",
+    apiKeyEnv: "BASEAI_API_KEY",
+    baseUrlEnv: "BASEAI_BASE_URL",
+    modelEnv: "CLAUDE_MODEL",
+    defaultBaseUrl: "https://baseai.rivergame.net/v1",
+    defaultModel: "claude-opus-4-8"
+  },
   deepseek_v4_pro: {
     id: "deepseek_v4_pro",
-    label: "DeepSeek V4 Pro",
+    label: "DeepSeek",
     apiKeyEnv: "DEEPSEEK_API_KEY",
     baseUrlEnv: "DEEPSEEK_BASE_URL",
     modelEnv: "DEEPSEEK_MODEL",
@@ -23,9 +41,16 @@ export const AI_PROVIDERS = {
 };
 
 const PROVIDER_ALIASES = new Map([
-  ["baseai", "baseai"],
-  ["base_ai", "baseai"],
-  ["company_bi", "baseai"],
+  ["baseai", "chatgpt"],
+  ["base_ai", "chatgpt"],
+  ["company_bi", "chatgpt"],
+  ["openai", "chatgpt"],
+  ["chatgpt", "chatgpt"],
+  ["gpt", "chatgpt"],
+  ["gemini", "gemini"],
+  ["google", "gemini"],
+  ["claude", "claude"],
+  ["anthropic", "claude"],
   ["deepseek", "deepseek_v4_pro"],
   ["deepseekv4pro", "deepseek_v4_pro"],
   ["deepseek_v4", "deepseek_v4_pro"],
@@ -96,8 +121,8 @@ export function loadDotEnv(projectRoot, env = process.env) {
 }
 
 export function normalizeAiProvider(value) {
-  const raw = String(value || "baseai").trim().toLowerCase().replaceAll("-", "_");
-  return PROVIDER_ALIASES.get(raw) || "baseai";
+  const raw = String(value || "chatgpt").trim().toLowerCase().replaceAll("-", "_");
+  return PROVIDER_ALIASES.get(raw) || "chatgpt";
 }
 
 export function aiRuntimeStatus(env = process.env, settings = {}) {

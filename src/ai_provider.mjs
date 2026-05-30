@@ -1,6 +1,6 @@
 import { AI_PROVIDERS, normalizeAiProvider } from "./env.mjs";
 
-export function aiProviderSettings(provider = "baseai", env = process.env) {
+export function aiProviderSettings(provider = "chatgpt", env = process.env) {
   const providerId = normalizeAiProvider(provider);
   const defaults = AI_PROVIDERS[providerId];
   return {
@@ -15,10 +15,10 @@ export function aiProviderSettings(provider = "baseai", env = process.env) {
 }
 
 export function baseAiSettings(env = process.env) {
-  return aiProviderSettings("baseai", env);
+  return aiProviderSettings("chatgpt", env);
 }
 
-export async function callAiJson(context, { provider = "baseai", env = process.env, fetchImpl = fetch } = {}) {
+export async function callAiJson(context, { provider = "chatgpt", env = process.env, fetchImpl = fetch } = {}) {
   const settings = aiProviderSettings(provider, env);
   if (!settings.apiKey) {
     throw new Error(`Missing ${settings.apiKeyEnv}`);
@@ -54,5 +54,5 @@ export async function callAiJson(context, { provider = "baseai", env = process.e
 }
 
 export async function callBaseAiJson(context, env = process.env, fetchImpl = fetch) {
-  return callAiJson(context, { provider: "baseai", env, fetchImpl });
+  return callAiJson(context, { provider: "chatgpt", env, fetchImpl });
 }

@@ -10,17 +10,35 @@ const aiStatusText = document.querySelector("#aiStatusText");
 const aiProviderSelect = document.querySelector("#aiProvider");
 
 const aiProviderDefaults = {
-  baseai: {
-    label: "公司 BI",
-    provider: "baseai",
+  chatgpt: {
+    label: "ChatGPT",
+    provider: "chatgpt",
     api_key_env: "BASEAI_API_KEY",
     base_url_env: "BASEAI_BASE_URL",
-    model_env: "BASEAI_MODEL",
+    model_env: "CHATGPT_MODEL",
     default_base_url: "https://baseai.rivergame.net/v1",
     default_model: "gpt-5.5"
   },
+  gemini: {
+    label: "Gemini",
+    provider: "gemini",
+    api_key_env: "BASEAI_API_KEY",
+    base_url_env: "BASEAI_BASE_URL",
+    model_env: "GEMINI_MODEL",
+    default_base_url: "https://baseai.rivergame.net/v1",
+    default_model: "gemini-3.1-pro-preview"
+  },
+  claude: {
+    label: "Claude",
+    provider: "claude",
+    api_key_env: "BASEAI_API_KEY",
+    base_url_env: "BASEAI_BASE_URL",
+    model_env: "CLAUDE_MODEL",
+    default_base_url: "https://baseai.rivergame.net/v1",
+    default_model: "claude-opus-4-8"
+  },
   deepseek_v4_pro: {
-    label: "DeepSeek V4 Pro",
+    label: "DeepSeek",
     provider: "deepseek_v4_pro",
     api_key_env: "DEEPSEEK_API_KEY",
     base_url_env: "DEEPSEEK_BASE_URL",
@@ -57,10 +75,10 @@ const sampleManifest = {
   ],
   habit_store: ".knowledge/habits.jsonl",
   ai: {
-    provider: "baseai",
+    provider: "chatgpt",
     api_key_env: "BASEAI_API_KEY",
     base_url_env: "BASEAI_BASE_URL",
-    model_env: "BASEAI_MODEL",
+    model_env: "CHATGPT_MODEL",
     default_base_url: "https://baseai.rivergame.net/v1",
     default_model: "gpt-5.5"
   }
@@ -69,7 +87,7 @@ const sampleManifest = {
 let lastPatch = null;
 let latestSchemaPath = localStorage.getItem("aiMetaAgent.latestSchemaPath") || "";
 let draftMode = localStorage.getItem("aiMetaAgent.draftMode") || "stub";
-let aiProvider = localStorage.getItem("aiMetaAgent.aiProvider") || "baseai";
+let aiProvider = localStorage.getItem("aiMetaAgent.aiProvider") || "chatgpt";
 let latestAiStatus = null;
 
 const rememberedFields = [
@@ -92,7 +110,7 @@ function setDraftMode(mode) {
 }
 
 function setAiProvider(provider) {
-  aiProvider = aiProviderDefaults[provider] ? provider : "baseai";
+  aiProvider = aiProviderDefaults[provider] ? provider : "chatgpt";
   aiProviderSelect.value = aiProvider;
   localStorage.setItem("aiMetaAgent.aiProvider", aiProvider);
   latestAiStatus = null;
@@ -100,7 +118,7 @@ function setAiProvider(provider) {
 }
 
 function applyAiProvider(manifest) {
-  const provider = aiProviderDefaults[aiProvider] || aiProviderDefaults.baseai;
+  const provider = aiProviderDefaults[aiProvider] || aiProviderDefaults.chatgpt;
   manifest.ai = {
     ...(manifest.ai || {}),
     provider: provider.provider,

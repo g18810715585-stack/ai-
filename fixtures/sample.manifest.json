@@ -29,10 +29,10 @@
   ],
   "habit_store": ".knowledge/habits.jsonl",
   "ai": {
-    "provider": "baseai",
+    "provider": "chatgpt",
     "api_key_env": "BASEAI_API_KEY",
     "base_url_env": "BASEAI_BASE_URL",
-    "model_env": "BASEAI_MODEL",
+    "model_env": "CHATGPT_MODEL",
     "default_base_url": "https://baseai.rivergame.net/v1",
     "default_model": "gpt-5.5"
   }

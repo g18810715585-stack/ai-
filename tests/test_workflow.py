@@ -266,6 +266,63 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(sheet.headers[:2], ["section", "content"])
         self.assertIn("活动时间", sheet.sample_rows[0]["content"])
 
+    def test_company_bi_model_provider_choices_share_baseai_endpoint(self) -> None:
+        response_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "patch_id": "patch_company_bi",
+                                "project": "provider-sample",
+                                "mode": "supervised_write",
+                                "operations": [],
+                                "generated_by": "ai-meta-agent",
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+        captured = []
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(response_payload).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            captured.append({"url": request.full_url, "body": json.loads(request.data.decode("utf-8"))})
+            return FakeResponse()
+
+        providers = {
+            "baseai": "gpt-5.5",
+            "gemini": "gemini-3.1-pro-preview",
+            "claude": "claude-opus-4-8",
+        }
+        with patch.dict(os.environ, {"BASEAI_API_KEY": "unit-key"}, clear=True):
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                for provider in providers:
+                    manifest = Manifest.model_validate(
+                        {
+                            "project": "provider-sample",
+                            "mode": "supervised_write",
+                            "schema_path": str(ROOT / "config" / "example.schema.json"),
+                            "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx", "role": "planning"}],
+                            "ai": {"provider": provider},
+                        }
+                    )
+                    generated = call_baseai(manifest, {"project": "provider-sample"})
+                    self.assertEqual(generated.patch_id, "patch_company_bi")
+
+        self.assertEqual([item["body"]["model"] for item in captured], list(providers.values()))
+        self.assertTrue(all(item["url"] == "https://baseai.rivergame.net/v1/chat/completions" for item in captured))
+
     def test_deepseek_provider_uses_openai_compatible_request(self) -> None:
         manifest = Manifest.model_validate(
             {

@@ -14,17 +14,35 @@ from .io_utils import write_json, write_text
 from .models import Manifest, Patch, PatchOperation, SchemaBundle, SourceRef
 
 AI_PROVIDERS = {
-    "baseai": {
-        "label": "公司 BI",
+    "chatgpt": {
+        "label": "ChatGPT",
         "api_key_env": "BASEAI_API_KEY",
         "base_url_env": "BASEAI_BASE_URL",
-        "model_env": "BASEAI_MODEL",
+        "model_env": "CHATGPT_MODEL",
         "default_base_url": "https://baseai.rivergame.net/v1",
         "default_model": "gpt-5.5",
         "extra_body": {},
     },
+    "gemini": {
+        "label": "Gemini",
+        "api_key_env": "BASEAI_API_KEY",
+        "base_url_env": "BASEAI_BASE_URL",
+        "model_env": "GEMINI_MODEL",
+        "default_base_url": "https://baseai.rivergame.net/v1",
+        "default_model": "gemini-3.1-pro-preview",
+        "extra_body": {},
+    },
+    "claude": {
+        "label": "Claude",
+        "api_key_env": "BASEAI_API_KEY",
+        "base_url_env": "BASEAI_BASE_URL",
+        "model_env": "CLAUDE_MODEL",
+        "default_base_url": "https://baseai.rivergame.net/v1",
+        "default_model": "claude-opus-4-8",
+        "extra_body": {},
+    },
     "deepseek_v4_pro": {
-        "label": "DeepSeek V4 Pro",
+        "label": "DeepSeek",
         "api_key_env": "DEEPSEEK_API_KEY",
         "base_url_env": "DEEPSEEK_BASE_URL",
         "model_env": "DEEPSEEK_MODEL",
@@ -35,9 +53,16 @@ AI_PROVIDERS = {
 }
 
 PROVIDER_ALIASES = {
-    "baseai": "baseai",
-    "base_ai": "baseai",
-    "company_bi": "baseai",
+    "baseai": "chatgpt",
+    "base_ai": "chatgpt",
+    "company_bi": "chatgpt",
+    "openai": "chatgpt",
+    "chatgpt": "chatgpt",
+    "gpt": "chatgpt",
+    "gemini": "gemini",
+    "google": "gemini",
+    "claude": "claude",
+    "anthropic": "claude",
     "deepseek": "deepseek_v4_pro",
     "deepseekv4pro": "deepseek_v4_pro",
     "deepseek_v4": "deepseek_v4_pro",
@@ -158,19 +183,13 @@ def make_stub_patch(manifest: Manifest, schema: SchemaBundle, context: dict[str,
 
 
 def normalize_ai_provider(provider: str | None) -> str:
-    key = str(provider or "baseai").strip().lower().replace("-", "_")
-    return PROVIDER_ALIASES.get(key, "baseai")
+    key = str(provider or "chatgpt").strip().lower().replace("-", "_")
+    return PROVIDER_ALIASES.get(key, "chatgpt")
 
 
 def _resolve_ai_runtime(manifest: Manifest) -> dict[str, Any]:
     provider_id = normalize_ai_provider(manifest.ai.provider)
     provider = dict(AI_PROVIDERS[provider_id])
-    if provider_id == "baseai":
-        provider["api_key_env"] = manifest.ai.api_key_env
-        provider["base_url_env"] = manifest.ai.base_url_env
-        provider["model_env"] = manifest.ai.model_env
-        provider["default_base_url"] = manifest.ai.default_base_url
-        provider["default_model"] = manifest.ai.default_model
     return provider | {"id": provider_id}
 
 

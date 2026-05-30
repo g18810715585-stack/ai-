@@ -41,10 +41,10 @@ class ConfigRoot(BaseModel):
 
 
 class AiSettings(BaseModel):
-    provider: str = "baseai"
+    provider: str = "chatgpt"
     api_key_env: str = "BASEAI_API_KEY"
     base_url_env: str = "BASEAI_BASE_URL"
-    model_env: str = "BASEAI_MODEL"
+    model_env: str = "CHATGPT_MODEL"
     default_base_url: str = "https://baseai.rivergame.net/v1"
     default_model: str = "gpt-5.5"
 

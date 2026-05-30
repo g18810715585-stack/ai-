@@ -49,12 +49,14 @@ node src/cli.mjs draft --manifest fixtures/sample.manifest.json --stub
 接入真实 AI 时，在项目根目录新建本地 `.env`（不要提交 Git），二选一或都填：
 
 ```text
-# 公司 BI
+# ChatGPT / Gemini / Claude 走公司 BI
 # BASEAI_API_KEY 填你的公司 BI Key
 BASEAI_BASE_URL=https://baseai.rivergame.net/v1
-BASEAI_MODEL=gpt-5.5
+CHATGPT_MODEL=gpt-5.5
+GEMINI_MODEL=gemini-3.1-pro-preview
+CLAUDE_MODEL=claude-opus-4-8
 
-# DeepSeek V4 Pro
+# DeepSeek
 # DEEPSEEK_API_KEY 填你的 DeepSeek Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-pro
@@ -62,7 +64,7 @@ DEEPSEEK_MODEL=deepseek-v4-pro
 
 实际 `.env` 里需要把注释行改成 `KEY=实际值`；例如只用 DeepSeek 时只配置 `DEEPSEEK_API_KEY` 即可。
 
-面板里“草案生成方式”保持“本地草案”时不会调用模型；切到“真实 AI”后，可在旁边选择“公司 BI”或“DeepSeek V4 Pro”。命令行模式通过 manifest 的 `ai.provider` 控制，支持 `baseai` 和 `deepseek_v4_pro`。
+面板里“草案生成方式”保持“本地草案”时不会调用模型；切到“真实 AI”后，可在旁边选择 `ChatGPT`、`Gemini`、`Claude`、`DeepSeek`。命令行模式通过 manifest 的 `ai.provider` 控制，支持 `chatgpt`、`gemini`、`claude`、`deepseek_v4_pro`；旧的 `baseai` 会兼容为 `chatgpt`。
 
 应用 patch 到预览副本：
 
