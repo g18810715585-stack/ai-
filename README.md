@@ -43,6 +43,18 @@ node src/cli.mjs apply --manifest fixtures/sample.manifest.json --patch .runs/la
 node src/cli.mjs server --port 4321
 ```
 
+Windows 也可以直接启动面板：
+
+```powershell
+.\open-panel.cmd
+```
+
+使用面板时请保持服务窗口打开。如果想在当前终端看服务日志，可以运行：
+
+```powershell
+.\run-panel.cmd
+```
+
 打开：
 
 ```text
