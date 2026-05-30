@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
@@ -12,7 +13,7 @@ from openpyxl.styles import PatternFill
 from ai_meta_agent.cli import analyze_manifest
 from ai_meta_agent.draft import make_stub_patch
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
-from ai_meta_agent.io_utils import write_json
+from ai_meta_agent.io_utils import read_json, write_json
 from ai_meta_agent.models import Manifest
 from ai_meta_agent.patch_engine import apply_patch
 from ai_meta_agent.schema import load_schema
@@ -212,6 +213,7 @@ class WorkflowTests(unittest.TestCase):
             config = config_dir / "multi.xlsx"
             make_config(config)
             workbook = load_workbook(config)
+            workbook["shop_pack_config"]["F2"] = datetime(2026, 6, 1, 5, 0, 0)
             note = workbook.create_sheet("说明")
             note["A1"] = "非数据页"
             workbook.save(config)
@@ -236,6 +238,8 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("pack_id", schema_draft["tables"]["shop_pack_config"]["fields"])
             self.assertTrue(any(item["name"] == "说明" for item in report["skipped_sheets"]))
             self.assertTrue((run_dir / "schema-draft.json").exists())
+            saved_report = read_json(run_dir / "schema-scan.json")
+            self.assertEqual(saved_report["tables"]["shop_pack_config"]["sample_rows"][0]["start_time"], "2026-06-01T05:00:00")
 
 
 if __name__ == "__main__":

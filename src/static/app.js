@@ -95,7 +95,13 @@ async function callApi(route, payload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
-  const data = await response.json();
+  const text = await response.text();
+  let data;
+  try {
+    data = JSON.parse(text || "{}");
+  } catch {
+    data = { error: text || "服务返回了非 JSON 内容" };
+  }
   rawText.textContent = JSON.stringify(data, null, 2);
   if (!response.ok) {
     setStatus("出错", "error");
@@ -114,25 +120,43 @@ function parseStdout(data) {
   }
 }
 
+function compactSchemaResult(data) {
+  const summary = parseStdout(data);
+  const artifact = data.artifact || {};
+  return {
+    summary,
+    schemaDraft: artifact.schemaDraft,
+    schemaScan: artifact.schemaScan
+  };
+}
+
+async function runAction(action) {
+  try {
+    await action();
+  } catch (error) {
+    setStatus(`出错：${error.message}`, "error");
+  }
+}
+
 document.querySelector("#loadSample").addEventListener("click", () => {
   manifestText.value = JSON.stringify(sampleManifest, null, 2);
 });
 
-document.querySelector("#analyzeBtn").addEventListener("click", async () => {
+document.querySelector("#schemaScanBtn").addEventListener("click", () => runAction(async () => {
+  const payload = await buildPayload();
+  const data = await callApi("/api/schema-scan", payload);
+  resultText.textContent = JSON.stringify(compactSchemaResult(data), null, 2);
+  showTab("result");
+}));
+
+document.querySelector("#analyzeBtn").addEventListener("click", () => runAction(async () => {
   const payload = await buildPayload();
   const data = await callApi("/api/analyze", payload);
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   showTab("result");
-});
+}));
 
-document.querySelector("#schemaScanBtn").addEventListener("click", async () => {
-  const payload = await buildPayload();
-  const data = await callApi("/api/schema-scan", payload);
-  resultText.textContent = JSON.stringify(data.artifact || parseStdout(data), null, 2);
-  showTab("result");
-});
-
-document.querySelector("#draftBtn").addEventListener("click", async () => {
+document.querySelector("#draftBtn").addEventListener("click", () => runAction(async () => {
   const payload = await buildPayload();
   payload.stub = true;
   const data = await callApi("/api/draft", payload);
@@ -142,17 +166,17 @@ document.querySelector("#draftBtn").addEventListener("click", async () => {
   }
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   showTab("patch");
-});
+}));
 
-document.querySelector("#applyBtn").addEventListener("click", async () => {
+document.querySelector("#applyBtn").addEventListener("click", () => runAction(async () => {
   const payload = await buildPayload();
   payload.patch = JSON.parse(patchText.value || JSON.stringify(lastPatch || {}));
   const data = await callApi("/api/apply", payload);
   resultText.textContent = JSON.stringify(data.artifact || parseStdout(data), null, 2);
   showTab("result");
-});
+}));
 
-document.querySelector("#learnBtn").addEventListener("click", async () => {
+document.querySelector("#learnBtn").addEventListener("click", () => runAction(async () => {
   const payload = await buildPayload();
   payload.patch = JSON.parse(patchText.value || JSON.stringify(lastPatch || {}));
   payload.decision = "accepted";
@@ -160,7 +184,7 @@ document.querySelector("#learnBtn").addEventListener("click", async () => {
   const data = await callApi("/api/learn", payload);
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   showTab("result");
-});
+}));
 
 for (const button of document.querySelectorAll(".tab")) {
   button.addEventListener("click", () => showTab(button.dataset.tab));

@@ -113,6 +113,56 @@ function maybeReadJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
+function countBy(items, field) {
+  const counts = {};
+  for (const item of items || []) {
+    const value = item?.[field] || "unknown";
+    counts[value] = (counts[value] || 0) + 1;
+  }
+  return counts;
+}
+
+function summarizeSchemaDraft(filePath) {
+  const data = maybeReadJson(filePath);
+  if (!data) return null;
+  const tableNames = Object.keys(data.tables || {}).sort();
+  return {
+    path: filePath,
+    version: data.version,
+    table_count: tableNames.length,
+    tables: tableNames.slice(0, 100),
+    omitted_tables: Math.max(0, tableNames.length - 100),
+    risk: data.risk
+  };
+}
+
+function summarizeSchemaScan(filePath) {
+  const data = maybeReadJson(filePath);
+  if (!data) return null;
+  const tables = Object.entries(data.tables || {}).sort(([left], [right]) => left.localeCompare(right));
+  const duplicates = Object.entries(data.duplicates || {}).sort(([left], [right]) => left.localeCompare(right));
+  return {
+    path: filePath,
+    roots: data.roots || [],
+    table_count: data.table_count || tables.length,
+    duplicate_count: duplicates.length,
+    duplicates: Object.fromEntries(duplicates.slice(0, 20)),
+    omitted_duplicates: Math.max(0, duplicates.length - 20),
+    reference_candidate_count: (data.reference_candidates || []).length,
+    skipped_count: (data.skipped_sheets || []).length,
+    skipped_by_reason: countBy(data.skipped_sheets, "reason"),
+    errors: data.errors || [],
+    tables: tables.slice(0, 80).map(([name, table]) => ({
+      name,
+      sheet: table.sheet,
+      source_file: table.source_file,
+      primary_key: table.primary_key || [],
+      field_count: Object.keys(table.fields || {}).length
+    })),
+    omitted_tables: Math.max(0, tables.length - 80)
+  };
+}
+
 function collectArtifact(result) {
   let parsed = {};
   try {
@@ -123,8 +173,8 @@ function collectArtifact(result) {
   const artifact = {};
   if (parsed.patch) artifact.patch = maybeReadJson(parsed.patch);
   if (parsed.result) artifact.result = maybeReadJson(parsed.result);
-  if (parsed.schema_draft) artifact.schemaDraft = maybeReadJson(parsed.schema_draft);
-  if (parsed.report) artifact.schemaScan = maybeReadJson(parsed.report);
+  if (parsed.schema_draft) artifact.schemaDraft = summarizeSchemaDraft(parsed.schema_draft);
+  if (parsed.report) artifact.schemaScan = summarizeSchemaScan(parsed.report);
   if (parsed.run_dir) {
     artifact.analysis = maybeReadJson(path.join(parsed.run_dir, "analysis.json"));
     artifact.diff = maybeReadJson(path.join(parsed.run_dir, "diff.json"));

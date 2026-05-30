@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +14,18 @@ def read_json(path: Path) -> Any:
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        json.dump(payload, handle, ensure_ascii=False, indent=2, default=_json_default)
         handle.write("\n")
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return value.total_seconds()
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
 
 
 def write_text(path: Path, text: str) -> None:
