@@ -146,8 +146,14 @@ class WorkflowTests(unittest.TestCase):
             config_dir = tmp / "configs"
             config_dir.mkdir()
             config = config_dir / "tables.xlsx"
+            misleading = config_dir / "shop_pack_config.xlsx"
             make_planning(planning)
             make_config(config)
+            misleading_workbook = Workbook()
+            misleading_sheet = misleading_workbook.active
+            misleading_sheet.title = "说明"
+            misleading_sheet["A1"] = "这个文件名像配置表，但 sheet 不是数据表"
+            misleading_workbook.save(misleading)
             manifest = {
                 "project": "root-sample",
                 "mode": "supervised_write",
@@ -164,8 +170,38 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("shop_pack_config", manifest_model.config_tables)
             self.assertIn("reward_item_config", manifest_model.config_tables)
             self.assertEqual(context["config_discovery"]["matched"]["shop_pack_config"]["source"], "sheet_name")
+            self.assertTrue(any(item["name"] == "说明" for item in context["config_discovery"]["skipped_sheets"]))
             patch = make_stub_patch(manifest_model, schema, context, str(tmp))
             self.assertEqual([op.op for op in patch.operations], ["update", "insert"])
+
+    def test_config_root_does_not_match_by_file_name(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            planning = tmp / "planning.xlsx"
+            config_dir = tmp / "configs"
+            config_dir.mkdir()
+            make_planning(planning)
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "Sheet1"
+            sheet.append(["pack_id", "name"])
+            sheet.append([1001, "文件名不能代表表名"])
+            workbook.save(config_dir / "shop_pack_config.xlsx")
+            manifest = {
+                "project": "file-name-is-not-table",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "run_root": str(tmp / ".runs"),
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": str(planning), "role": "planning"}],
+                "config_roots": [{"path": str(config_dir), "recursive": True}],
+                "habit_store": str(tmp / ".knowledge" / "habits.jsonl"),
+            }
+            manifest_path = tmp / "manifest-root.json"
+            write_json(manifest_path, manifest)
+
+            manifest_model, _, _, context = analyze_manifest(manifest_path, tmp, "analysis")
+            self.assertNotIn("shop_pack_config", manifest_model.config_tables)
+            self.assertIn("shop_pack_config", context["config_discovery"]["unmatched_tables"])
 
 
 if __name__ == "__main__":
