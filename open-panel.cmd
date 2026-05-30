@@ -13,14 +13,18 @@ if not exist "%NODE_EXE%" set "NODE_EXE=node"
 call :check_health
 if not errorlevel 1 goto open_panel
 
-echo Starting AI Meta Agent panel at %PANEL_URL%
-echo Keep this window open while using the panel.
-echo.
-"%NODE_EXE%" src\cli.mjs server --port 4321 --open
-echo.
-echo Panel server stopped. Press any key to close this window.
-pause >nul
-exit /b %errorlevel%
+wscript.exe //nologo "%~dp0scripts\start-panel-hidden.vbs" "%NODE_EXE%" "%~dp0"
+
+for /l %%i in (1,1,20) do (
+  call :check_health
+  if not errorlevel 1 goto open_panel
+  timeout /t 1 /nobreak >nul
+)
+
+echo AI Meta Agent panel did not become ready at %PANEL_URL%.
+echo Run run-panel.cmd to see the server error logs.
+pause
+exit /b 1
 
 :open_panel
 start "" "%PANEL_URL%"

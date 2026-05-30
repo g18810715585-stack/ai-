@@ -49,7 +49,13 @@ Windows 也可以直接启动面板：
 .\open-panel.cmd
 ```
 
-`open-panel.cmd` 会在当前窗口启动服务，并在监听成功后自动打开浏览器。使用面板时请保持这个服务窗口打开。如果想在当前终端看服务日志，也可以运行：
+`open-panel.cmd` 会在后台隐藏启动本地服务，并在健康检查通过后自动打开浏览器。使用完面板后可以停止本地服务：
+
+```powershell
+.\stop-panel.cmd
+```
+
+如果面板打不开，想在当前终端看服务日志，可以运行：
 
 ```powershell
 .\run-panel.cmd

@@ -135,7 +135,7 @@ function collectArtifact(result) {
 async function handleApi(req, res, projectRoot) {
   const url = new URL(req.url, "http://127.0.0.1");
   if (url.pathname === "/api/health") {
-    sendJson(res, 200, { ok: true });
+    sendJson(res, 200, { ok: true, pid: process.pid });
     return;
   }
   if (req.method !== "POST") {
@@ -172,6 +172,31 @@ function openUrl(url) {
   child.unref();
 }
 
+function writePidFile(projectRoot, port) {
+  const runsDir = path.join(projectRoot, ".runs");
+  fs.mkdirSync(runsDir, { recursive: true });
+  const pidFile = path.join(runsDir, `panel-${port}.pid`);
+  fs.writeFileSync(pidFile, String(process.pid), "utf8");
+  const cleanup = () => {
+    try {
+      if (fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").trim() === String(process.pid)) {
+        fs.unlinkSync(pidFile);
+      }
+    } catch {
+      // Best-effort cleanup only.
+    }
+  };
+  process.once("exit", cleanup);
+  process.once("SIGINT", () => {
+    cleanup();
+    process.exit(0);
+  });
+  process.once("SIGTERM", () => {
+    cleanup();
+    process.exit(0);
+  });
+}
+
 export async function startServer({ port = 4321, projectRoot, openBrowser = false }) {
   const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
@@ -181,6 +206,7 @@ export async function startServer({ port = 4321, projectRoot, openBrowser = fals
     serveStatic(req, res);
   });
   await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  writePidFile(projectRoot, port);
   const url = `http://127.0.0.1:${port}`;
   console.log(`ai-meta-agent panel: ${url}`);
   if (openBrowser) {
