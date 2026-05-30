@@ -63,7 +63,7 @@ async function main() {
   if (command === "server") {
     const portArg = rest.indexOf("--port");
     const port = portArg >= 0 ? Number(rest[portArg + 1]) : Number(process.env.PORT || 4321);
-    await startServer({ port, projectRoot });
+    await startServer({ port, projectRoot, openBrowser: rest.includes("--open") });
     return 0;
   }
   if (["analyze", "draft", "apply", "learn"].includes(command)) {

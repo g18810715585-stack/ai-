@@ -4,6 +4,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -164,7 +165,14 @@ async function handleApi(req, res, projectRoot) {
   sendJson(res, result.status === 0 ? 200 : 500, { ...result, artifact: collectArtifact(result) });
 }
 
-export async function startServer({ port = 4321, projectRoot }) {
+function openUrl(url) {
+  const command = process.platform === "win32" ? "cmd" : process.platform === "darwin" ? "open" : "xdg-open";
+  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+  const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
+  child.unref();
+}
+
+export async function startServer({ port = 4321, projectRoot, openBrowser = false }) {
   const server = http.createServer((req, res) => {
     if (req.url.startsWith("/api/")) {
       handleApi(req, res, projectRoot).catch((error) => sendJson(res, 500, { error: error.message }));
@@ -173,5 +181,9 @@ export async function startServer({ port = 4321, projectRoot }) {
     serveStatic(req, res);
   });
   await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
-  console.log(`ai-meta-agent panel: http://127.0.0.1:${port}`);
+  const url = `http://127.0.0.1:${port}`;
+  console.log(`ai-meta-agent panel: ${url}`);
+  if (openBrowser) {
+    openUrl(url);
+  }
 }
