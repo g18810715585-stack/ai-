@@ -8,6 +8,15 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { aiRuntimeStatus, loadDotEnv } from "./env.mjs";
+import {
+  createProject,
+  latestProjectRunFile,
+  listProjects,
+  projectManifestPatch,
+  readProject,
+  recordWorkflowRun,
+  updateProject
+} from "./projects.mjs";
 import { buildPythonEnv } from "./python_env.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -74,12 +83,15 @@ function serveStatic(req, res) {
   fs.createReadStream(filePath).pipe(res);
 }
 
-function materializeRequest(projectRoot, payload) {
+function materializeRequest(projectRoot, payload, projectId = null) {
   const uploadRoot = path.join(projectRoot, ".runs", `upload-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`);
   fs.mkdirSync(uploadRoot, { recursive: true });
-  const manifest = payload.manifest || {};
+  let manifest = JSON.parse(JSON.stringify(payload.manifest || {}));
+  if (projectId) {
+    manifest = projectManifestPatch(projectRoot, projectId, manifest);
+  }
   if (payload.useLatestSchema) {
-    const latestSchema = latestSchemaDraft(projectRoot);
+    const latestSchema = latestSchemaDraft(projectRoot, projectId);
     if (latestSchema) {
       manifest.schema_path = latestSchema;
     }
@@ -130,7 +142,11 @@ function maybeReadJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
-function latestSchemaDraft(projectRoot) {
+function latestSchemaDraft(projectRoot, projectId = null) {
+  if (projectId) {
+    const projectSchema = latestProjectRunFile(projectRoot, projectId, "LATEST_SCHEMA_DRAFT.txt");
+    if (projectSchema) return projectSchema;
+  }
   const runsDir = path.join(projectRoot, ".runs");
   const pointer = path.join(runsDir, "LATEST_SCHEMA_DRAFT.txt");
   if (fs.existsSync(pointer)) {
@@ -150,7 +166,11 @@ function latestSchemaDraft(projectRoot) {
   return candidates[0]?.filePath || null;
 }
 
-function latestSchemaScan(projectRoot) {
+function latestSchemaScan(projectRoot, projectId = null) {
+  if (projectId) {
+    const projectScan = latestProjectRunFile(projectRoot, projectId, "LATEST_SCHEMA_SCAN.txt", "schema-scan.json");
+    if (projectScan) return projectScan;
+  }
   const runsDir = path.join(projectRoot, ".runs");
   const pointer = path.join(runsDir, "LATEST_SCHEMA_SCAN.txt");
   if (fs.existsSync(pointer)) {
@@ -233,9 +253,9 @@ function isConfigTableName(name) {
   return /^[A-Za-z][A-Za-z0-9_]*$/.test(String(name || ""));
 }
 
-function tableOptions(projectRoot) {
-  const schemaPath = latestSchemaDraft(projectRoot);
-  const scanPath = latestSchemaScan(projectRoot);
+function tableOptions(projectRoot, projectId = null) {
+  const schemaPath = latestSchemaDraft(projectRoot, projectId);
+  const scanPath = latestSchemaScan(projectRoot, projectId);
   const schema = maybeReadJson(schemaPath);
   const scan = maybeReadJson(scanPath);
   const commonEntries = loadCommonTableEntries(projectRoot);
@@ -416,6 +436,35 @@ function collectArtifact(result) {
 
 async function handleApi(req, res, projectRoot) {
   const url = new URL(req.url, "http://127.0.0.1");
+  const projectRoute = /^\/api\/projects(?:\/([^/]+))?$/.exec(url.pathname);
+  if (projectRoute) {
+    try {
+      const projectId = projectRoute[1] ? decodeURIComponent(projectRoute[1]) : null;
+      if (req.method === "GET" && !projectId) {
+        sendJson(res, 200, { ok: true, projects: listProjects(projectRoot) });
+        return;
+      }
+      if (req.method === "POST" && !projectId) {
+        const payload = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        const project = createProject(projectRoot, payload);
+        sendJson(res, 200, { ok: true, project });
+        return;
+      }
+      if (req.method === "GET" && projectId) {
+        sendJson(res, 200, { ok: true, project: readProject(projectRoot, projectId) });
+        return;
+      }
+      if (req.method === "PATCH" && projectId) {
+        const payload = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        sendJson(res, 200, { ok: true, project: updateProject(projectRoot, projectId, payload) });
+        return;
+      }
+      sendJson(res, 405, { error: "method not allowed" });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
   if (url.pathname === "/api/health") {
     sendJson(res, 200, { ok: true, pid: process.pid });
     return;
@@ -431,7 +480,7 @@ async function handleApi(req, res, projectRoot) {
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/latest-schema") {
-    const schemaPath = latestSchemaDraft(projectRoot);
+    const schemaPath = latestSchemaDraft(projectRoot, url.searchParams.get("project_id"));
     if (!schemaPath) {
       sendJson(res, 404, { error: "no schema scan found" });
       return;
@@ -441,7 +490,7 @@ async function handleApi(req, res, projectRoot) {
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/table-options") {
-    sendJson(res, 200, tableOptions(projectRoot));
+    sendJson(res, 200, tableOptions(projectRoot, url.searchParams.get("project_id")));
     return;
   }
   if (req.method !== "POST") {
@@ -449,14 +498,19 @@ async function handleApi(req, res, projectRoot) {
     return;
   }
   const payload = JSON.parse((await readBody(req)).toString("utf8") || "{}");
-  const { manifestPath, uploadRoot } = materializeRequest(projectRoot, payload);
+  const projectId = payload.project_id || null;
+  if (projectId) readProject(projectRoot, projectId);
+  const { manifestPath, uploadRoot } = materializeRequest(projectRoot, payload, projectId);
   let args;
+  let projectStep = null;
   if (url.pathname === "/api/analyze") {
     args = ["analyze", "--manifest", manifestPath];
+    projectStep = "analyze";
   } else if (url.pathname === "/api/teach") {
     args = ["teach", "--manifest", manifestPath, "--text", payload.experience_text || "", "--source", "panel"];
   } else if (url.pathname === "/api/experience-summary") {
     args = ["experience-summary", "--manifest", manifestPath, "--text", payload.experience_text || ""];
+    projectStep = "experienceSummary";
   } else if (url.pathname === "/api/experience-list") {
     args = ["experience-list", "--manifest", manifestPath];
   } else if (url.pathname === "/api/experience-update") {
@@ -465,17 +519,22 @@ async function handleApi(req, res, projectRoot) {
     args = ["experience-delete", "--experience-id", payload.experience_id || ""];
   } else if (url.pathname === "/api/activity-plan") {
     args = ["plan", "--manifest", manifestPath];
+    projectStep = "activityPlan";
   } else if (url.pathname === "/api/schema-scan") {
     args = ["schema-scan", "--manifest", manifestPath];
+    projectStep = "schemaScan";
   } else if (url.pathname === "/api/relations") {
     args = ["relations", "--manifest", manifestPath, ...(payload.explain ? ["--explain"] : [])];
+    projectStep = "relations";
   } else if (url.pathname === "/api/draft") {
     args = ["draft", "--manifest", manifestPath, ...(payload.stub === false ? [] : ["--stub"])];
+    projectStep = "draft";
   } else if (url.pathname === "/api/apply") {
     const patchPath = path.join(uploadRoot, "patch.json");
     fs.writeFileSync(patchPath, JSON.stringify(payload.patch || {}, null, 2), "utf8");
     const writeMode = payload.write_mode === "overwrite" ? "overwrite" : "preview";
     args = ["apply", "--manifest", manifestPath, "--patch", patchPath, "--write-mode", writeMode];
+    projectStep = writeMode === "overwrite" ? "applyOverwrite" : "applyPreview";
   } else if (url.pathname === "/api/case-review") {
     const patchPath = path.join(uploadRoot, "patch.json");
     const applyResultPath = path.join(uploadRoot, "apply-result.json");
@@ -493,16 +552,30 @@ async function handleApi(req, res, projectRoot) {
       payload.correction_text || ""
     ];
     if (payload.no_ai) args.push("--no-ai");
+    projectStep = "caseReview";
   } else if (url.pathname === "/api/learn") {
     const patchPath = path.join(uploadRoot, "patch.json");
     fs.writeFileSync(patchPath, JSON.stringify(payload.patch || {}, null, 2), "utf8");
     args = ["learn", "--manifest", manifestPath, "--patch", patchPath, "--decision", payload.decision || "accepted", "--note", payload.note || ""];
+    projectStep = "learn";
   } else {
     sendJson(res, 404, { error: "unknown api route" });
     return;
   }
   const result = runCore(projectRoot, args);
-  sendJson(res, result.status === 0 ? 200 : 500, { ...result, artifact: collectArtifact(result) });
+  const artifact = collectArtifact(result);
+  let project = null;
+  if (projectId && projectStep) {
+    try {
+      project = recordWorkflowRun(projectRoot, projectId, projectStep, { result, artifact, payload });
+    } catch (error) {
+      if (result.status === 0) {
+        result.status = 1;
+        result.stderr = `${result.stderr || ""}\nProject record failed: ${error.message}`.trim();
+      }
+    }
+  }
+  sendJson(res, result.status === 0 ? 200 : 500, { ...result, artifact, project });
 }
 
 function openUrl(url) {

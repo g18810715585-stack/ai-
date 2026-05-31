@@ -15,6 +15,18 @@
       <div class="status" id="status" role="status" aria-live="polite">就绪</div>
     </header>
 
+    <section class="project-bar" aria-label="配表项目">
+      <div class="project-field">
+        <span>当前配表项目</span>
+        <select id="projectSelect" aria-label="当前配表项目">
+          <option value="">请选择或新建配表项目</option>
+        </select>
+      </div>
+      <button id="newProjectBtn" type="button">新建项目</button>
+      <button id="refreshProjectsBtn" type="button">项目列表</button>
+      <div id="projectMeta" class="project-meta">刷新后会自动恢复上次打开的项目。</div>
+    </section>
+
     <main class="layout">
       <section class="panel input-panel">
         <div class="section-title">
@@ -43,6 +55,11 @@
             <p id="targetTablesSummary" class="target-summary">尚未选择。请先扫描配置目录，再选择本次活动的主要关联表。</p>
           </div>
           <button id="openTargetDialog" type="button">选择配置表</button>
+        </section>
+
+        <section class="project-memory">
+          <div class="field-title">项目运行记录</div>
+          <div id="projectStepStatus" class="step-status">当前项目还没有运行记录。</div>
         </section>
 
         <section class="experience-entry">

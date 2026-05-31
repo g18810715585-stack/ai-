@@ -8,6 +8,9 @@ const resultText = document.querySelector("#resultText");
 const recordText = document.querySelector("#recordText");
 const rawText = document.querySelector("#rawText");
 const statusEl = document.querySelector("#status");
+const projectSelect = document.querySelector("#projectSelect");
+const projectMeta = document.querySelector("#projectMeta");
+const projectStepStatus = document.querySelector("#projectStepStatus");
 const configDirInput = document.querySelector("#configDir");
 const planningFeishuUrlInput = document.querySelector("#planningFeishuUrl");
 const itemBaseFeishuUrlInput = document.querySelector("#itemBaseFeishuUrl");
@@ -111,6 +114,9 @@ const sampleManifest = {
 };
 
 let lastPatch = null;
+let activeProjectId = localStorage.getItem(storageKey("activeProjectId")) || "";
+let activeProject = null;
+let projectList = [];
 let latestSchemaPath = localStorage.getItem(storageKey("latestSchemaPath")) || "";
 let draftMode = localStorage.getItem(storageKey("draftMode")) || "stub";
 let aiProvider = localStorage.getItem(storageKey("aiProvider")) || "chatgpt";
@@ -174,6 +180,288 @@ function setStatus(text, state = "") {
   statusEl.dataset.state = state || "idle";
 }
 
+function projectApiUrl(projectId = "") {
+  return projectId ? `/api/projects/${encodeURIComponent(projectId)}` : "/api/projects";
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const text = await response.text();
+  let data;
+  try {
+    data = JSON.parse(text || "{}");
+  } catch {
+    data = { error: text || "服务返回了非 JSON 内容" };
+  }
+  if (!response.ok) throw new Error(data.error || "请求失败");
+  return data;
+}
+
+function projectInputsSnapshot() {
+  return {
+    config_dir: configDirInput.value.trim(),
+    planning_feishu_url: planningFeishuUrlInput.value.trim(),
+    item_base_feishu_url: itemBaseFeishuUrlInput.value.trim(),
+    target_tables: selectedTargetTables,
+    ai_provider: aiProvider,
+    draft_mode: draftMode,
+    schema_path: latestSchemaPath,
+    experience_text: experienceText.value.trim(),
+    experience_summary_text: experienceSummaryText.value.trim(),
+    case_correction_text: caseCorrectionText.value.trim()
+  };
+}
+
+function projectUiSnapshot() {
+  const activeTab = document.querySelector(".tab.active")?.dataset.tab || "patch";
+  return { last_tab: activeTab };
+}
+
+function renderProjectList() {
+  const options = ['<option value="">请选择或新建配表项目</option>'];
+  for (const project of projectList) {
+    const selected = project.project_id === activeProjectId ? "selected" : "";
+    const time = formatTime(project.updated_at);
+    options.push(`<option value="${escapeHtml(project.project_id)}" ${selected}>${escapeHtml(project.name)} · ${escapeHtml(time)}</option>`);
+  }
+  projectSelect.innerHTML = options.join("");
+  projectSelect.value = activeProjectId || "";
+}
+
+function renderProjectMeta() {
+  if (!activeProject) {
+    projectMeta.textContent = "请先新建或选择一个配表项目。刷新后会自动恢复上次打开的项目。";
+    renderProjectStepStatus();
+    return;
+  }
+  const tables = activeProject.inputs?.target_tables || [];
+  projectMeta.textContent = `项目：${activeProject.name} · 更新：${formatTime(activeProject.updated_at)} · 目标表 ${tables.length} 张`;
+  renderProjectStepStatus();
+}
+
+async function loadProjects({ silent = false } = {}) {
+  try {
+    const data = await fetchJson(projectApiUrl());
+    projectList = data.projects || [];
+    if (activeProjectId && !projectList.some((project) => project.project_id === activeProjectId)) {
+      activeProjectId = "";
+      activeProject = null;
+      localStorage.removeItem(storageKey("activeProjectId"));
+    }
+    renderProjectList();
+    if (!activeProject && activeProjectId) await loadProject(activeProjectId, { silent: true });
+    if (!silent) setStatus("项目列表已刷新", "ok");
+    return projectList;
+  } catch (error) {
+    if (!silent) setStatus(`项目列表加载失败：${error.message}`, "error");
+    return [];
+  }
+}
+
+async function loadProject(projectId, { silent = false } = {}) {
+  if (!projectId) return null;
+  try {
+    const data = await fetchJson(projectApiUrl(projectId));
+    activeProject = data.project;
+    activeProjectId = activeProject.project_id;
+    localStorage.setItem(storageKey("activeProjectId"), activeProjectId);
+    restoreProject(activeProject);
+    renderProjectList();
+    renderProjectMeta();
+    if (!silent) setStatus("配表项目已恢复", "ok");
+    return activeProject;
+  } catch (error) {
+    if (!silent) setStatus(`配表项目恢复失败：${error.message}`, "error");
+    return null;
+  }
+}
+
+async function createProjectFromPrompt() {
+  const name = window.prompt("请输入这个配表项目的名称，例如：2026航海节兑换店");
+  if (!name?.trim()) return;
+  const data = await fetchJson(projectApiUrl(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name.trim(), inputs: projectInputsSnapshot(), ui: projectUiSnapshot() })
+  });
+  activeProject = data.project;
+  activeProjectId = activeProject.project_id;
+  localStorage.setItem(storageKey("activeProjectId"), activeProjectId);
+  await loadProjects({ silent: true });
+  await loadProject(activeProjectId, { silent: true });
+  setStatus("新配表项目已创建", "ok");
+}
+
+async function saveActiveProjectState({ silent = true } = {}) {
+  if (!activeProjectId) return null;
+  try {
+    const data = await fetchJson(projectApiUrl(activeProjectId), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inputs: projectInputsSnapshot(), ui: projectUiSnapshot() })
+    });
+    activeProject = data.project;
+    renderProjectMeta();
+    if (!silent) setStatus("项目状态已保存", "ok");
+    return activeProject;
+  } catch (error) {
+    if (!silent) setStatus(`项目状态保存失败：${error.message}`, "error");
+    return null;
+  }
+}
+
+let saveProjectTimer = null;
+function scheduleProjectSave() {
+  if (!activeProjectId) return;
+  clearTimeout(saveProjectTimer);
+  saveProjectTimer = setTimeout(() => {
+    saveActiveProjectState().catch(() => {});
+  }, 500);
+}
+
+function ensureActiveProject() {
+  if (!activeProjectId) {
+    throw new Error("请先点击“新建项目”，把本次配表流程放进一个单独项目里。");
+  }
+}
+
+function restoreProject(project) {
+  const inputs = project.inputs || {};
+  configDirInput.value = inputs.config_dir || configDirInput.value;
+  planningFeishuUrlInput.value = inputs.planning_feishu_url || planningFeishuUrlInput.value;
+  itemBaseFeishuUrlInput.value = inputs.item_base_feishu_url || itemBaseFeishuUrlInput.value;
+  if (inputs.experience_text) experienceText.value = inputs.experience_text;
+  if (inputs.experience_summary_text) experienceSummaryText.value = inputs.experience_summary_text;
+  if (inputs.case_correction_text) caseCorrectionText.value = inputs.case_correction_text;
+  if (inputs.ai_provider) setAiProvider(inputs.ai_provider);
+  if (inputs.draft_mode) setDraftMode(inputs.draft_mode);
+  if (inputs.schema_path) {
+    latestSchemaPath = inputs.schema_path;
+    localStorage.setItem(storageKey("latestSchemaPath"), latestSchemaPath);
+  }
+  selectedTargetTables = normalizeTableNames(inputs.target_tables || selectedTargetTables);
+  writeJsonStorage("targetTables", selectedTargetTables);
+  updateTargetSummary();
+  applyTargetTablesToManifest();
+  restoreProjectSteps(project);
+  const lastTab = project.ui?.last_tab;
+  if (lastTab && Array.from(document.querySelectorAll(".tab")).some((button) => button.dataset.tab === lastTab)) showTab(lastTab);
+  saveExperienceBtn.disabled = !experienceSummaryText.value.trim();
+  saveCaseReviewBtn.disabled = !lastConfigurationRecord || !caseCorrectionText.value.trim();
+}
+
+function restoreProjectSteps(project) {
+  const steps = project.steps || {};
+  const relations = steps.relations?.data?.relationshipMap || steps.analyze?.data?.relationshipMap || steps.draft?.data?.relationshipMap;
+  if (relations?.summary) relationsText.textContent = JSON.stringify(formatStoredRelationshipMap(relations), null, 2);
+  const plan = steps.draft?.data?.configPlan || steps.analyze?.data?.configPlan || steps.activityPlan?.data?.parsed?.config_plan;
+  if (plan) {
+    planText.textContent = typeof plan === "string" ? plan : formatConfigPlan(plan);
+    confirmationsText.textContent = typeof plan === "string" ? "" : formatConfirmations(plan);
+  }
+  const patch = steps.draft?.data?.patch;
+  if (patch) {
+    lastPatch = patch;
+    patchText.value = JSON.stringify(patch, null, 2);
+  }
+  const diagnostics = steps.draft?.data?.draftDiagnostics;
+  if (diagnostics) diagnosticsText.textContent = formatDraftDiagnostics(diagnostics);
+  const applyStep = steps.applyOverwrite || steps.applyPreview;
+  if (applyStep?.data) {
+    lastApplyResult = applyStep.data.result || null;
+    lastConfigurationRecord = applyStep.data.configurationRecord || null;
+    recordText.textContent = JSON.stringify({
+      summary: applyStep.summary,
+      result: applyStep.data.result,
+      configuration_record: applyStep.data.configurationRecord,
+      diff: applyStep.data.diff
+    }, null, 2);
+  }
+  const analysis = steps.analyze?.data?.analysis;
+  if (analysis) {
+    resultText.textContent = JSON.stringify({
+      restored_from_project: true,
+      analysis,
+      planning_item_resolution: steps.analyze?.data?.planningItemResolution || null
+    }, null, 2);
+  }
+}
+
+function formatStoredRelationshipMap(map) {
+  return {
+    summary: map.summary || {},
+    target_tables: map.target_tables || [],
+    recommended_tables: map.recommended_tables || [],
+    ai_review: map.ai_review || null,
+    relations: (map.relations || []).slice(0, 80).map((relation) => ({
+      from: relation.from ? relation.from : `${relation.from_table}.${relation.from_field}`,
+      to: relation.to ? relation.to : `${relation.to_table}.${relation.to_field}`,
+      to_field_kind: relation.to_field_kind,
+      type: relation.relation_type || relation.type,
+      confidence: relation.confidence,
+      risk: relation.risk,
+      hop: relation.hop,
+      evidence: relation.evidence
+    })),
+    diagnostics: map.diagnostics || {}
+  };
+}
+
+const stepLabels = {
+  schemaScan: "扫描目录",
+  relations: "关联关系",
+  analyze: "分析表格",
+  activityPlan: "活动模板",
+  draft: "草案",
+  applyPreview: "预览",
+  applyOverwrite: "覆盖",
+  caseReview: "复盘",
+  learn: "习惯"
+};
+
+function renderProjectStepStatus() {
+  if (!projectStepStatus) return;
+  if (!activeProject) {
+    projectStepStatus.textContent = "当前项目还没有运行记录。";
+    return;
+  }
+  const steps = activeProject.steps || {};
+  const names = Object.keys(stepLabels);
+  projectStepStatus.innerHTML = names.map((step) => {
+    const record = steps[step];
+    if (!record) return `<span class="step-chip">${escapeHtml(stepLabels[step])}：未运行</span>`;
+    return `
+      <span class="step-chip ready">
+        ${escapeHtml(stepLabels[step])}：${escapeHtml(formatTime(record.updated_at))}
+        <button type="button" data-show-project-step="${escapeHtml(step)}">查看</button>
+      </span>
+    `;
+  }).join("");
+}
+
+function showProjectStep(step) {
+  const record = activeProject?.steps?.[step];
+  if (!record) return;
+  if (step === "relations" && record.data?.relationshipMap) {
+    relationsText.textContent = JSON.stringify(formatStoredRelationshipMap(record.data.relationshipMap), null, 2);
+    showTab("relations");
+    return;
+  }
+  if (step === "draft") {
+    if (record.data?.patch) patchText.value = JSON.stringify(record.data.patch, null, 2);
+    if (record.data?.draftDiagnostics) diagnosticsText.textContent = formatDraftDiagnostics(record.data.draftDiagnostics);
+    showTab(record.data?.patch ? "patch" : "diagnostics");
+    return;
+  }
+  if ((step === "applyPreview" || step === "applyOverwrite") && record.data) {
+    recordText.textContent = JSON.stringify(record.data, null, 2);
+    showTab("record");
+    return;
+  }
+  resultText.textContent = JSON.stringify(record, null, 2);
+  showTab("result");
+}
+
 // Only the clicked workflow button stays enabled while a long backend action runs.
 function setActionBusy(button, label, busy) {
   if (!button) return;
@@ -202,6 +490,7 @@ function setDraftMode(mode) {
   for (const button of document.querySelectorAll("[data-ai-mode]")) {
     button.classList.toggle("active", button.dataset.aiMode === draftMode);
   }
+  scheduleProjectSave();
 }
 
 function setAiProvider(provider) {
@@ -210,6 +499,7 @@ function setAiProvider(provider) {
   localStorage.setItem(storageKey("aiProvider"), aiProvider);
   latestAiStatus = null;
   loadAiStatus();
+  scheduleProjectSave();
 }
 
 function applyAiProvider(manifest) {
@@ -233,6 +523,7 @@ function showTab(name) {
     panel.classList.remove("active");
   }
   document.querySelector(`#${name}Tab`).classList.add("active");
+  scheduleProjectSave();
 }
 
 function normalizeTableNames(values) {
@@ -361,6 +652,7 @@ function syncTargetsFromManifest() {
     selectedTargetTables = normalizeTableNames(manifest.target_tables || selectedTargetTables);
     writeJsonStorage("targetTables", selectedTargetTables);
     updateTargetSummary();
+    scheduleProjectSave();
   } catch {
     updateTargetSummary();
   }
@@ -383,7 +675,8 @@ function fallbackTableOptionsFromManifest() {
 async function loadTableOptions({ silent = false } = {}) {
   let refreshed = true;
   try {
-    const response = await fetch("/api/table-options");
+    const suffix = activeProjectId ? `?project_id=${encodeURIComponent(activeProjectId)}` : "";
+    const response = await fetch(`/api/table-options${suffix}`);
     if (!response.ok) throw new Error("no scan result");
     const data = await response.json();
     serverCommonTables = normalizeTableNames(data.common_tables || []);
@@ -488,6 +781,7 @@ function saveTargetSelection() {
   writeJsonStorage("targetTables", selectedTargetTables);
   updateTargetSummary();
   applyTargetTablesToManifest();
+  scheduleProjectSave();
   closeTargetDialog();
   setStatus(`已选择 ${selectedTargetTables.length} 张目标配置表`, "ok");
 }
@@ -664,7 +958,13 @@ async function buildPayload() {
     });
   }
   manifest.planning_sources = planningSources;
-  return { manifest, files: [], useLatestSchema: Boolean(latestSchemaPath) };
+  return {
+    manifest,
+    files: [],
+    useLatestSchema: Boolean(latestSchemaPath),
+    project_id: activeProjectId || null,
+    draft_mode: draftMode
+  };
 }
 
 function ensureTargetTablesSelected() {
@@ -680,6 +980,8 @@ function ensurePlanningSource(manifest) {
 }
 
 async function callApi(route, payload, { label = "处理" } = {}) {
+  if (activeProjectId && !payload.project_id) payload.project_id = activeProjectId;
+  if (activeProjectId) await saveActiveProjectState();
   setStatus(`正在${label}...`, "busy");
   const response = await fetch(route, {
     method: "POST",
@@ -700,6 +1002,10 @@ async function callApi(route, payload, { label = "处理" } = {}) {
     throw new Error(data.error || data.stderr || "请求失败");
   }
   setStatus(`${label}完成`, "ok");
+  if (data.project) {
+    activeProject = data.project;
+    renderProjectMeta();
+  }
   return data;
 }
 
@@ -1040,7 +1346,8 @@ function rememberSchemaPath(schemaPath) {
 
 async function loadLatestSchema() {
   try {
-    const response = await fetch("/api/latest-schema");
+    const suffix = activeProjectId ? `?project_id=${encodeURIComponent(activeProjectId)}` : "";
+    const response = await fetch(`/api/latest-schema${suffix}`);
     if (!response.ok) return;
     const data = await response.json();
     rememberSchemaPath(data.schema_path);
@@ -1048,6 +1355,17 @@ async function loadLatestSchema() {
   } catch {
     // The first run may not have a schema scan yet.
   }
+}
+
+async function initializeProjects() {
+  await loadProjects({ silent: true });
+  if (activeProjectId) {
+    await loadProject(activeProjectId, { silent: true });
+  } else {
+    renderProjectList();
+    renderProjectMeta();
+  }
+  await loadLatestSchema();
 }
 
 async function runAction(event, action) {
@@ -1069,16 +1387,24 @@ async function runAction(event, action) {
 }
 
 for (const [, input] of rememberedFields) {
-  input.addEventListener("input", saveRememberedInputs);
-  input.addEventListener("change", saveRememberedInputs);
+  input.addEventListener("input", () => {
+    saveRememberedInputs();
+    scheduleProjectSave();
+  });
+  input.addEventListener("change", () => {
+    saveRememberedInputs();
+    scheduleProjectSave();
+  });
 }
 
 experienceSummaryText.addEventListener("input", () => {
   saveExperienceBtn.disabled = !experienceSummaryText.value.trim();
+  scheduleProjectSave();
 });
 
 caseCorrectionText.addEventListener("input", () => {
   saveCaseReviewBtn.disabled = !lastConfigurationRecord || !caseCorrectionText.value.trim();
+  scheduleProjectSave();
 });
 
 document.querySelector("#loadSample").addEventListener("click", () => {
@@ -1089,6 +1415,27 @@ document.querySelector("#loadSample").addEventListener("click", () => {
   manifestText.value = JSON.stringify(sampleManifest, null, 2);
   updateTargetSummary();
   setStatus("示例已加载", "ok");
+});
+
+document.querySelector("#newProjectBtn").addEventListener("click", (event) => runAction(event, async () => {
+  await createProjectFromPrompt();
+}));
+
+document.querySelector("#refreshProjectsBtn").addEventListener("click", (event) => runAction(event, async () => {
+  await loadProjects({ silent: true });
+  setStatus("项目列表已刷新", "ok");
+}));
+
+projectSelect.addEventListener("change", (event) => {
+  const projectId = event.target.value;
+  if (!projectId) return;
+  loadProject(projectId).catch((error) => setStatus(`项目恢复失败：${error.message}`, "error"));
+});
+
+projectStepStatus.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-show-project-step]");
+  if (!button) return;
+  showProjectStep(button.dataset.showProjectStep);
 });
 
 for (const button of document.querySelectorAll("[data-ai-mode]")) {
@@ -1155,6 +1502,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.querySelector("#schemaScanBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+  ensureActiveProject();
   const payload = await buildPayload();
   const data = await callApi("/api/schema-scan", payload, { label });
   rememberSchemaPath(data.artifact?.schemaDraft?.path || parseStdout(data).schema_draft);
@@ -1165,6 +1513,7 @@ document.querySelector("#schemaScanBtn").addEventListener("click", (event) => ru
 }));
 
 document.querySelector("#relationsBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+  ensureActiveProject();
   ensureTargetTablesSelected();
   const payload = await buildPayload();
   if (draftMode === "real") {
@@ -1178,6 +1527,7 @@ document.querySelector("#relationsBtn").addEventListener("click", (event) => run
 }));
 
 document.querySelector("#teachBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+  ensureActiveProject();
   const text = experienceText.value.trim();
   if (!text) throw new Error("请先写入一条配表经验");
   const payload = await buildPayload();
@@ -1191,6 +1541,7 @@ document.querySelector("#teachBtn").addEventListener("click", (event) => runActi
 }));
 
 saveExperienceBtn.addEventListener("click", (event) => runAction(event, async (label) => {
+  ensureActiveProject();
   const text = experienceSummaryText.value.trim();
   if (!text) throw new Error("请先整理经验，或在整理结果中填写要保存的内容");
   const payload = await buildPayload();
@@ -1212,6 +1563,7 @@ saveExperienceBtn.addEventListener("click", (event) => runAction(event, async (l
 }));
 
 document.querySelector("#activityPlanBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+  ensureActiveProject();
   const payload = await buildPayload();
   ensurePlanningSource(payload.manifest);
   const data = await callApi("/api/activity-plan", payload, { label });
@@ -1221,6 +1573,7 @@ document.querySelector("#activityPlanBtn").addEventListener("click", (event) => 
 }));
 
 document.querySelector("#analyzeBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+  ensureActiveProject();
   ensureTargetTablesSelected();
   const payload = await buildPayload();
   ensurePlanningSource(payload.manifest);
@@ -1242,6 +1595,7 @@ document.querySelector("#analyzeBtn").addEventListener("click", (event) => runAc
 }));
 
 document.querySelector("#draftBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+  ensureActiveProject();
   ensureTargetTablesSelected();
   const payload = await buildPayload();
   ensurePlanningSource(payload.manifest);
@@ -1276,6 +1630,7 @@ document.querySelector("#draftBtn").addEventListener("click", (event) => runActi
 }));
 
 async function applyCurrentPatch(writeMode, label) {
+  ensureActiveProject();
   const payload = await buildPayload();
   payload.patch = JSON.parse(patchText.value || JSON.stringify(lastPatch || {}));
   payload.write_mode = writeMode;
@@ -1296,6 +1651,7 @@ document.querySelector("#overwriteBtn").addEventListener("click", (event) => run
 }));
 
 saveCaseReviewBtn.addEventListener("click", (event) => runAction(event, async (label) => {
+  ensureActiveProject();
   if (!lastApplyResult || !lastConfigurationRecord) {
     throw new Error("请先生成预览或覆盖原表，拿到本次配表记录后再复盘。");
   }
@@ -1322,6 +1678,7 @@ saveCaseReviewBtn.addEventListener("click", (event) => runAction(event, async (l
 }));
 
 document.querySelector("#learnBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+  ensureActiveProject();
   const payload = await buildPayload();
   payload.patch = JSON.parse(patchText.value || JSON.stringify(lastPatch || {}));
   payload.decision = "accepted";
@@ -1345,4 +1702,4 @@ applyTargetTablesToManifest();
 setAiProvider(aiProvider);
 setDraftMode(draftMode);
 updateTargetSummary();
-loadLatestSchema();
+initializeProjects().catch((error) => setStatus(`项目初始化失败：${error.message}`, "error"));
