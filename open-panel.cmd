@@ -6,12 +6,13 @@ cd /d "%~dp0"
 if not exist ".runs" mkdir ".runs"
 
 set "PANEL_URL=http://127.0.0.1:4321"
-set "HEALTH_URL=http://127.0.0.1:4321/api/health"
 set "NODE_EXE=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
 if not exist "%NODE_EXE%" set "NODE_EXE=node"
 
-call :check_health
+call :check_panel
 if not errorlevel 1 goto open_existing
+
+call :cleanup_stale_pid
 
 echo Starting AI Meta Agent panel...
 echo.
@@ -31,6 +32,25 @@ exit /b %EXIT_CODE%
 start "" "%PANEL_URL%"
 exit /b 0
 
-:check_health
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -UseBasicParsing -Uri '%HEALTH_URL%' -TimeoutSec 1; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }"
+:check_panel
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "$base='%PANEL_URL%';" ^
+  "$health=Invoke-RestMethod -Uri ($base + '/api/health') -TimeoutSec 2;" ^
+  "$tables=Invoke-RestMethod -Uri ($base + '/api/table-options') -TimeoutSec 2;" ^
+  "$html=(Invoke-WebRequest -UseBasicParsing -Uri $base -TimeoutSec 2).Content;" ^
+  "$app=(Invoke-WebRequest -UseBasicParsing -Uri ($base + '/app.js') -TimeoutSec 2).Content;" ^
+  "if (-not $health.ok) { throw 'health failed' }" ^
+  "if (($tables.table_count -as [int]) -lt 1) { throw 'table-options missing' }" ^
+  "if (-not $html.Contains('targetDialog')) { throw 'panel html is stale' }" ^
+  "if (-not $app.Contains('serverCommonTables')) { throw 'app.js is stale' }" ^
+  "exit 0"
 exit /b %errorlevel%
+
+:cleanup_stale_pid
+set "PID_FILE=.runs\panel-4321.pid"
+if not exist "%PID_FILE%" exit /b 0
+set /p PANEL_PID=<"%PID_FILE%"
+if not "%PANEL_PID%"=="" taskkill /PID %PANEL_PID% /F >nul 2>nul
+del "%PID_FILE%" >nul 2>nul
+exit /b 0

@@ -1,4 +1,21 @@
 @echo off
 setlocal
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:4321/api/health' -TimeoutSec 2; Write-Host 'Panel health OK:' $r.Content; exit 0 } catch { Write-Host 'Panel is not reachable at http://127.0.0.1:4321'; exit 1 }"
+cd /d "%~dp0"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "$base='http://127.0.0.1:4321';" ^
+  "try {" ^
+  "  $health=Invoke-RestMethod -Uri ($base + '/api/health') -TimeoutSec 2;" ^
+  "  $tables=Invoke-RestMethod -Uri ($base + '/api/table-options') -TimeoutSec 2;" ^
+  "  $html=(Invoke-WebRequest -UseBasicParsing -Uri $base -TimeoutSec 2).Content;" ^
+  "  $appResp=Invoke-WebRequest -UseBasicParsing -Uri ($base + '/app.js') -TimeoutSec 2;" ^
+  "  $app=$appResp.Content;" ^
+  "  $ok = $health.ok -and (($tables.table_count -as [int]) -gt 0) -and $html.Contains('targetDialog') -and $app.Contains('serverCommonTables');" ^
+  "  [pscustomobject]@{ reachable=$true; ok=$ok; pid=$health.pid; tableCount=$tables.table_count; commonCount=$tables.common_tables.Count; htmlReady=$html.Contains('targetDialog'); appReady=$app.Contains('serverCommonTables'); cacheControl=$appResp.Headers['Cache-Control'] } | ConvertTo-Json -Compress | Write-Host;" ^
+  "  if ($ok) { exit 0 } else { exit 1 }" ^
+  "} catch {" ^
+  "  [pscustomobject]@{ reachable=$false; ok=$false; error=$_.Exception.Message } | ConvertTo-Json -Compress | Write-Host;" ^
+  "  exit 1" ^
+  "}"
