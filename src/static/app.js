@@ -9,6 +9,7 @@ const rawText = document.querySelector("#rawText");
 const statusEl = document.querySelector("#status");
 const configDirInput = document.querySelector("#configDir");
 const planningFeishuUrlInput = document.querySelector("#planningFeishuUrl");
+const itemBaseFeishuUrlInput = document.querySelector("#itemBaseFeishuUrl");
 const experienceText = document.querySelector("#experienceText");
 const experienceSummaryText = document.querySelector("#experienceSummaryText");
 const saveExperienceBtn = document.querySelector("#saveExperienceBtn");
@@ -124,6 +125,7 @@ let selectedExperienceId = "";
 const rememberedFields = [
   ["configDir", configDirInput],
   ["planningFeishuUrl", planningFeishuUrlInput],
+  ["itemBaseFeishuUrl", itemBaseFeishuUrlInput],
   ["experienceText", experienceText],
   ["experienceSummaryText", experienceSummaryText]
 ];
@@ -622,6 +624,7 @@ async function buildPayload() {
   const manifest = JSON.parse(manifestText.value);
   applyAiProvider(manifest);
   const planningFeishuUrl = planningFeishuUrlInput.value.trim();
+  const itemBaseFeishuUrl = itemBaseFeishuUrlInput.value.trim();
   const configDir = configDirInput.value.trim();
   saveRememberedInputs();
 
@@ -633,8 +636,9 @@ async function buildPayload() {
   } else {
     delete manifest.target_tables;
   }
+  let planningSources = Array.isArray(manifest.planning_sources) ? [...manifest.planning_sources] : [];
   if (planningFeishuUrl) {
-    manifest.planning_sources = [
+    planningSources = [
       {
         id: "feishu-planning",
         kind: "feishu",
@@ -644,6 +648,17 @@ async function buildPayload() {
       }
     ];
   }
+  planningSources = planningSources.filter((source) => source.id !== "feishu-value-table");
+  if (itemBaseFeishuUrl) {
+    planningSources.push({
+      id: "feishu-value-table",
+      kind: "feishu",
+      url: itemBaseFeishuUrl,
+      range: "A1:ZZ3000",
+      role: "item_base"
+    });
+  }
+  manifest.planning_sources = planningSources;
   return { manifest, files: [], useLatestSchema: Boolean(latestSchemaPath) };
 }
 
@@ -655,7 +670,7 @@ function ensureTargetTablesSelected() {
 
 function ensurePlanningSource(manifest) {
   if (planningFeishuUrlInput.value.trim()) return;
-  if (Array.isArray(manifest.planning_sources) && manifest.planning_sources.length) return;
+  if (Array.isArray(manifest.planning_sources) && manifest.planning_sources.some((source) => (source.role || "planning") === "planning")) return;
   throw new Error("请先填写飞书规划链接，或在 Manifest 里配置 planning_sources");
 }
 
@@ -744,6 +759,17 @@ function compactRelationshipMap(data) {
       missing_refs: (map.diagnostics?.missing_refs || []).slice(0, 40),
       errors: map.diagnostics?.errors || []
     }
+  };
+}
+
+function compactItemResolution(data) {
+  const resolution = data.artifact?.planningItemResolution || data.artifact?.analysis?.planning_item_resolution || {};
+  return {
+    enabled: Boolean(resolution.enabled),
+    summary: resolution.summary || {},
+    matches: (resolution.matches || []).slice(0, 30),
+    missing: (resolution.missing || []).slice(0, 20),
+    warnings: resolution.warnings || []
   };
 }
 
@@ -1151,7 +1177,15 @@ document.querySelector("#analyzeBtn").addEventListener("click", (event) => runAc
     relationsText.textContent = JSON.stringify(compactRelationshipMap(data), null, 2);
   }
   renderPlanArtifact(data);
-  resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
+  resultText.textContent = JSON.stringify(
+    {
+      summary: parseStdout(data),
+      planning_item_resolution: compactItemResolution(data),
+      analysis: data.artifact?.analysis || null
+    },
+    null,
+    2
+  );
   showTab("result");
 }));
 

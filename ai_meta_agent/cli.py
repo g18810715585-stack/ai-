@@ -27,6 +27,7 @@ from .experience import (
 )
 from .habits import append_habit, habit_from_patch, load_habits, match_habits
 from .io_utils import make_run_dir, read_json, write_json, write_text
+from .item_resolution import compact_item_resolution, resolve_planning_items
 from .models import Manifest, Patch
 from .patch_engine import apply_patch
 from .relation_scanner import compact_relationship_context, scan_relationships
@@ -108,7 +109,9 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
     habits = load_habits(_habit_path(base_dir, manifest))
     matched = match_habits(habits, manifest.project, list(schema.tables.keys()))
     experience = build_experience_context(base_dir, manifest, schema, workbooks, relationship_map)
-    context = build_minimal_context(manifest, schema, workbooks, matched, experience_context_payload(experience))
+    item_resolution = resolve_planning_items(manifest, workbooks)
+    compact_items = compact_item_resolution(item_resolution)
+    context = build_minimal_context(manifest, schema, workbooks, matched, experience_context_payload(experience), compact_items)
     context["source_errors"] = source_errors
     context["config_discovery"] = config_discovery
     context["relationship_map"] = compact_relationship_context(relationship_map)
@@ -121,12 +124,14 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
         "matched_habits": [habit.model_dump(mode="json", exclude_none=True) for habit in matched],
         "config_discovery": config_discovery,
         "relationship_map": relationship_map,
+        "planning_item_resolution": item_resolution,
         "experience": experience,
         "config_plan": experience["config_plan"],
     }
     write_json(run_dir / "analysis.json", analysis)
     write_json(run_dir / "ai-context.json", context)
     write_json(run_dir / "config-plan.json", experience["config_plan"])
+    write_json(run_dir / "planning-item-resolution.json", item_resolution)
     write_text(run_dir / "analysis.md", summarize_analysis(workbooks, schema, matched))
     return manifest, schema, run_dir, context
 

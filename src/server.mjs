@@ -364,6 +364,13 @@ function summarizeAnalysis(filePath) {
       recommended_tables: data.relationship_map.recommended_tables || [],
       error_count: data.relationship_map.summary?.error_count || 0
     } : null,
+    planning_item_resolution: data.planning_item_resolution ? {
+      enabled: Boolean(data.planning_item_resolution.enabled),
+      summary: data.planning_item_resolution.summary || {},
+      matches: (data.planning_item_resolution.matches || []).slice(0, 40),
+      missing: (data.planning_item_resolution.missing || []).slice(0, 20),
+      warnings: data.planning_item_resolution.warnings || []
+    } : null,
     matched_habit_count: (data.matched_habits || []).length
   };
 }
@@ -382,11 +389,13 @@ function collectArtifact(result) {
   if (parsed.draft_diagnostics) artifact.draftDiagnostics = maybeReadJson(parsed.draft_diagnostics);
   if (parsed.result) artifact.result = maybeReadJson(parsed.result);
   if (parsed.relationship_map) artifact.relationshipMap = maybeReadJson(parsed.relationship_map);
+  if (parsed.planning_item_resolution) artifact.planningItemResolution = maybeReadJson(parsed.planning_item_resolution);
   if (parsed.schema_draft) artifact.schemaDraft = summarizeSchemaDraft(parsed.schema_draft);
   if (parsed.report) artifact.schemaScan = summarizeSchemaScan(parsed.report);
   if (parsed.run_dir) {
     artifact.analysis = summarizeAnalysis(path.join(parsed.run_dir, "analysis.json"));
     artifact.relationshipMap = artifact.relationshipMap || maybeReadJson(path.join(parsed.run_dir, "relationship-map.json"));
+    artifact.planningItemResolution = artifact.planningItemResolution || maybeReadJson(path.join(parsed.run_dir, "planning-item-resolution.json"));
     artifact.configPlan = artifact.configPlan || maybeReadJson(path.join(parsed.run_dir, "config-plan.json"));
     artifact.draftDiagnostics = artifact.draftDiagnostics || maybeReadJson(path.join(parsed.run_dir, "draft-diagnostics.json"));
     artifact.diff = maybeReadJson(path.join(parsed.run_dir, "diff.json"));

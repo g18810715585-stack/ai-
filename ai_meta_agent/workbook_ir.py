@@ -107,7 +107,7 @@ def _sample_rows_from_matrix(values: list[list[Any]], header_row: int | None, he
     return rows
 
 
-def _matrix_to_sheet_ir(name: str, values: list[list[Any]], max_cells_per_sheet: int = 400) -> SheetIR:
+def _matrix_to_sheet_ir(name: str, values: list[list[Any]], max_cells_per_sheet: int = 400, sample_row_limit: int = 20) -> SheetIR:
     max_row = len(values)
     max_column = max((len(row) for row in values), default=0)
     header_row, headers = _detect_header_from_matrix(values)
@@ -136,7 +136,7 @@ def _matrix_to_sheet_ir(name: str, values: list[list[Any]], max_cells_per_sheet:
         max_column=max_column,
         headers=headers,
         header_row=header_row,
-        sample_rows=_sample_rows_from_matrix(values, header_row, headers),
+        sample_rows=_sample_rows_from_matrix(values, header_row, headers, limit=sample_row_limit),
         cells=cells,
     )
 
@@ -154,7 +154,7 @@ def _text_to_sheet_ir(name: str, text: str, max_lines: int = 300) -> SheetIR:
     return _matrix_to_sheet_ir(name, rows)
 
 
-def load_local_workbook_ir(source: PlanningSource, path: Path, max_cells_per_sheet: int = 400) -> WorkbookIR:
+def load_local_workbook_ir(source: PlanningSource, path: Path, max_cells_per_sheet: int = 400, sample_row_limit: int = 20) -> WorkbookIR:
     workbook = load_workbook(path, data_only=True)
     sheets: list[SheetIR] = []
     for sheet in workbook.worksheets:
@@ -198,7 +198,7 @@ def load_local_workbook_ir(source: PlanningSource, path: Path, max_cells_per_she
                 merged_ranges=[str(item) for item in sheet.merged_cells.ranges],
                 headers=headers,
                 header_row=header_row,
-                sample_rows=_sample_rows(sheet, header_row, headers),
+                sample_rows=_sample_rows(sheet, header_row, headers, limit=sample_row_limit),
                 cells=cells,
             )
         )
@@ -207,9 +207,11 @@ def load_local_workbook_ir(source: PlanningSource, path: Path, max_cells_per_she
 
 def load_feishu_workbook_ir(source: PlanningSource, base_dir: Path) -> WorkbookIR:
     payload = read_feishu_source(source.url or "", base_dir, sheet_id=source.sheet_id, range_name=source.range)
+    row_limit = 3000 if source.role in {"item_base", "value_table", "value"} else 1000
+    cell_limit = 12000 if source.role in {"item_base", "value_table", "value"} else 400
     if payload.kind == "sheet":
         sheet_name = payload.title or payload.sheet_id or source.role or "飞书规划表"
-        sheets = [_matrix_to_sheet_ir(sheet_name, payload.values)]
+        sheets = [_matrix_to_sheet_ir(sheet_name, payload.values, max_cells_per_sheet=cell_limit, sample_row_limit=row_limit)]
     else:
         sheets = [_text_to_sheet_ir(payload.title or "飞书规划文档", payload.text)]
     return WorkbookIR(source_id=source.id, source_type=source.kind, url=source.url, sheets=sheets)
@@ -222,5 +224,7 @@ def load_source_ir(source: PlanningSource, base_dir: Path) -> WorkbookIR:
             path = (base_dir / path).resolve()
         if not path.exists():
             raise FileNotFoundError(f"Planning workbook not found: {path}")
-        return load_local_workbook_ir(source, path)
+        row_limit = 3000 if source.role in {"item_base", "value_table", "value"} else 1000
+        cell_limit = 12000 if source.role in {"item_base", "value_table", "value"} else 400
+        return load_local_workbook_ir(source, path, max_cells_per_sheet=cell_limit, sample_row_limit=row_limit)
     return load_feishu_workbook_ir(source, base_dir)

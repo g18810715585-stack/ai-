@@ -28,6 +28,7 @@ from ai_meta_agent.experience import (
 from ai_meta_agent.feishu import FeishuSourcePayload
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
 from ai_meta_agent.io_utils import read_json, write_json
+from ai_meta_agent.item_resolution import resolve_planning_items
 from ai_meta_agent.models import Manifest, Patch, PlanningSource, SchemaBundle, SheetIR, SourceKind, WorkbookIR
 from ai_meta_agent.patch_engine import apply_patch
 from ai_meta_agent.relation_scanner import scan_relationships, split_reference_values
@@ -557,6 +558,53 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(sheet.name, "活动规划")
         self.assertEqual(sheet.headers[:2], ["section", "content"])
         self.assertIn("活动时间", sheet.sample_rows[0]["content"])
+
+    def test_planning_items_resolve_reward_type_and_id_from_value_table(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "item-resolution-sample",
+                "schema_path": "schema.json",
+                "planning_sources": [
+                    {"id": "plan", "kind": "feishu", "url": "https://rivergame.feishu.cn/wiki/plan?sheet=a", "role": "planning"},
+                    {"id": "value", "kind": "feishu", "url": "https://rivergame.feishu.cn/wiki/value?sheet=b", "role": "item_base"},
+                ],
+            }
+        )
+        workbooks = [
+            WorkbookIR(
+                source_id="plan",
+                source_type=SourceKind.FEISHU,
+                sheets=[
+                    SheetIR(
+                        name="规划表",
+                        max_row=2,
+                        max_column=2,
+                        headers=["商品名称", "价格"],
+                        header_row=1,
+                        sample_rows=[{"__row": 2, "商品名称": "克拉肯", "价格": 100}],
+                    )
+                ],
+            ),
+            WorkbookIR(
+                source_id="value",
+                source_type=SourceKind.FEISHU,
+                sheets=[
+                    SheetIR(
+                        name="基础价值表",
+                        max_row=2,
+                        max_column=4,
+                        headers=["商品名称", "奖励类型", "内容ID", "数量"],
+                        header_row=1,
+                        sample_rows=[{"__row": 2, "商品名称": "克拉肯", "奖励类型": 7, "内容ID": 323, "数量": 1}],
+                    )
+                ],
+            ),
+        ]
+        result = resolve_planning_items(manifest, workbooks)
+        self.assertTrue(result["enabled"])
+        self.assertEqual(result["summary"]["matched"], 1)
+        self.assertEqual(result["matches"][0]["reward_type"], 7)
+        self.assertEqual(result["matches"][0]["content_id"], 323)
 
     def test_company_bi_model_provider_choices_share_baseai_endpoint(self) -> None:
         response_payload = {

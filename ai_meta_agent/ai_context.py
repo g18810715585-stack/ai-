@@ -33,6 +33,7 @@ def build_minimal_context(
     workbooks: list[WorkbookIR],
     habits: list[Habit],
     experience: dict[str, Any] | None = None,
+    item_resolution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     table_names = list(schema.tables.keys())
     context = {
@@ -42,6 +43,7 @@ def build_minimal_context(
             "Return strict JSON matching Patch schema.",
             "Every operation must include target_table, source_ref, reason, confidence, risk_level.",
             "Do not invent objects not present in planning rows or habits.",
+            "When planning_item_resolution is present, use it as evidence for product reward type, content ID, and quantity.",
             "Mark low-confidence or high-risk operations as needs_confirmation=true.",
         ],
         "schema": {
@@ -88,6 +90,8 @@ def build_minimal_context(
         "matched_habits": habit_context(habits),
         "target_tables": table_names,
     }
+    if item_resolution:
+        context["planning_item_resolution"] = item_resolution
     if experience:
         context.update(
             {
