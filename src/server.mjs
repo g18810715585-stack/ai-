@@ -377,6 +377,7 @@ function collectArtifact(result) {
   }
   const artifact = {};
   if (parsed.patch) artifact.patch = maybeReadJson(parsed.patch);
+  if (parsed.experience_summary) artifact.experienceSummary = maybeReadJson(parsed.experience_summary);
   if (parsed.config_plan) artifact.configPlan = maybeReadJson(parsed.config_plan);
   if (parsed.draft_diagnostics) artifact.draftDiagnostics = maybeReadJson(parsed.draft_diagnostics);
   if (parsed.result) artifact.result = maybeReadJson(parsed.result);
@@ -436,6 +437,8 @@ async function handleApi(req, res, projectRoot) {
     args = ["analyze", "--manifest", manifestPath];
   } else if (url.pathname === "/api/teach") {
     args = ["teach", "--manifest", manifestPath, "--text", payload.experience_text || "", "--source", "panel"];
+  } else if (url.pathname === "/api/experience-summary") {
+    args = ["experience-summary", "--manifest", manifestPath, "--text", payload.experience_text || ""];
   } else if (url.pathname === "/api/activity-plan") {
     args = ["plan", "--manifest", manifestPath];
   } else if (url.pathname === "/api/schema-scan") {

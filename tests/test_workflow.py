@@ -13,9 +13,9 @@ from openpyxl.comments import Comment
 from openpyxl.styles import PatternFill
 
 from ai_meta_agent.cli import analyze_manifest
-from ai_meta_agent.draft import call_baseai, call_draft_diagnostics_ai, call_relationship_ai, make_stub_patch
+from ai_meta_agent.draft import call_baseai, call_draft_diagnostics_ai, call_experience_summary_ai, call_relationship_ai, make_stub_patch
 from ai_meta_agent.draft_diagnostics import build_draft_diagnostics, compact_draft_diagnostic_context
-from ai_meta_agent.experience import append_case_from_patch, build_experience_context, teach_experience
+from ai_meta_agent.experience import append_case_from_patch, build_experience_context, merge_experience_summary, summarize_experience_locally, teach_experience
 from ai_meta_agent.feishu import FeishuSourcePayload
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
 from ai_meta_agent.io_utils import read_json, write_json
@@ -192,6 +192,88 @@ class WorkflowTests(unittest.TestCase):
             self.assertGreaterEqual(result["created"]["field_mappings"], 2)
             self.assertTrue((tmp / ".knowledge" / "rules.jsonl").exists())
             self.assertTrue((tmp / ".knowledge" / "activity_templates.jsonl").read_text(encoding="utf-8").strip())
+
+    def test_experience_summary_is_reviewed_before_save(self) -> None:
+        local = summarize_experience_locally(
+            "lesson-sample",
+            "兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key。商品名 -> goods.name，价格 -> exchange.price。",
+        )
+        self.assertEqual(local["mode"], "local")
+        self.assertIn("字段映射", local["review_text"])
+        self.assertGreaterEqual(len(local["records_preview"]["field_mappings"]), 2)
+
+        merged = merge_experience_summary(
+            "lesson-sample",
+            "raw text",
+            local,
+            {
+                "summary_title": "兑换商店字段经验",
+                "review_text": "经验标题：兑换商店字段经验\n字段映射：\n- 商品名 -> goods.name\n- 价格 -> exchange.price",
+                "field_mappings": [{"source_aliases": ["商品名"], "target_table": "goods", "target_field": "name"}],
+                "activity_templates": [],
+                "personal_rules": [],
+                "questions": [],
+                "risk_notes": ["保存前确认目标字段"],
+            },
+        )
+        self.assertEqual(merged["mode"], "ai")
+        self.assertIn("goods.name", merged["review_text"])
+        self.assertTrue(merged["records_preview"]["field_mappings"])
+
+    def test_experience_summary_ai_uses_review_json_shape(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "summary-ai-sample",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx", "role": "planning"}],
+                "ai": {"provider": "deepseek_v4_pro"},
+            }
+        )
+        response_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "summary_title": "兑换商店经验",
+                                "review_text": "商品名 -> goods.name",
+                                "activity_templates": [],
+                                "field_mappings": [],
+                                "personal_rules": [],
+                                "questions": [],
+                                "risk_notes": [],
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(response_payload).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        with patch.dict(os.environ, {"BASEAI_API_KEY": "unit-key"}, clear=True):
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                summary = call_experience_summary_ai(manifest, {"raw_experience": "兑换商店经验"})
+
+        self.assertEqual(summary["summary_title"], "兑换商店经验")
+        self.assertEqual(captured["url"], "https://baseai.rivergame.net/v1/chat/completions")
+        self.assertEqual(captured["body"]["response_format"], {"type": "json_object"})
+        self.assertIn("review_text", captured["body"]["messages"][0]["content"])
 
     def test_activity_template_matching_builds_config_plan(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

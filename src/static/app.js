@@ -10,6 +10,8 @@ const statusEl = document.querySelector("#status");
 const configDirInput = document.querySelector("#configDir");
 const planningFeishuUrlInput = document.querySelector("#planningFeishuUrl");
 const experienceText = document.querySelector("#experienceText");
+const experienceSummaryText = document.querySelector("#experienceSummaryText");
+const saveExperienceBtn = document.querySelector("#saveExperienceBtn");
 const aiStatusText = document.querySelector("#aiStatusText");
 const aiProviderSelect = document.querySelector("#aiProvider");
 const targetTablesSummary = document.querySelector("#targetTablesSummary");
@@ -108,11 +110,13 @@ let serverCommonTableMeta = new Map();
 resetStoredTablesWhenPresetChanges();
 let selectedTargetTables = readJsonStorage("targetTables", []);
 let pendingTargetSelection = new Set();
+let latestExperienceSummary = null;
 
 const rememberedFields = [
   ["configDir", configDirInput],
   ["planningFeishuUrl", planningFeishuUrlInput],
-  ["experienceText", experienceText]
+  ["experienceText", experienceText],
+  ["experienceSummaryText", experienceSummaryText]
 ];
 
 function storageKey(name) {
@@ -627,6 +631,32 @@ function compactConfigPlan(data) {
   return data.artifact?.configPlan || data.config_plan || null;
 }
 
+function compactExperienceSummary(data) {
+  return data.artifact?.experienceSummary || data.experience_summary || null;
+}
+
+function renderExperienceSummary(data) {
+  const summary = compactExperienceSummary(data);
+  if (!summary) return null;
+  latestExperienceSummary = summary;
+  experienceSummaryText.value = summary.review_text || "";
+  saveRememberedInputs();
+  saveExperienceBtn.disabled = !experienceSummaryText.value.trim();
+  resultText.textContent = JSON.stringify(
+    {
+      mode: summary.mode,
+      summary_title: summary.summary_title,
+      questions: summary.questions || [],
+      risk_notes: summary.risk_notes || [],
+      ai_error: summary.ai_error || null,
+      records_preview: summary.records_preview || null
+    },
+    null,
+    2
+  );
+  return summary;
+}
+
 function renderPlanArtifact(data) {
   const plan = compactConfigPlan(data);
   if (!plan) return null;
@@ -841,6 +871,10 @@ for (const [, input] of rememberedFields) {
   input.addEventListener("change", saveRememberedInputs);
 }
 
+experienceSummaryText.addEventListener("input", () => {
+  saveExperienceBtn.disabled = !experienceSummaryText.value.trim();
+});
+
 document.querySelector("#loadSample").addEventListener("click", () => {
   latestSchemaPath = "";
   localStorage.removeItem(storageKey("latestSchemaPath"));
@@ -925,12 +959,26 @@ document.querySelector("#teachBtn").addEventListener("click", (event) => runActi
   if (!text) throw new Error("请先写入一条配表经验");
   const payload = await buildPayload();
   payload.experience_text = text;
+  const data = await callApi("/api/experience-summary", payload, { label });
+  const summary = renderExperienceSummary(data);
+  showTab("result");
+  if (summary?.ai_error) {
+    setStatus("AI 整理失败，已生成本地整理结果", "error");
+  }
+}));
+
+saveExperienceBtn.addEventListener("click", (event) => runAction(event, async (label) => {
+  const text = experienceSummaryText.value.trim();
+  if (!text) throw new Error("请先整理经验，或在整理结果中填写要保存的内容");
+  const payload = await buildPayload();
+  payload.experience_text = text;
   const data = await callApi("/api/teach", payload, { label });
   const summary = parseStdout(data);
   resultText.textContent = JSON.stringify(
     {
       store: summary.store,
       created: summary.created,
+      summary_title: latestExperienceSummary?.summary_title || null,
       hint: "经验已写入本地 .knowledge，后续识别模板和生成草案会自动参考。"
     },
     null,
@@ -1019,6 +1067,7 @@ for (const button of document.querySelectorAll(".tab")) {
 
 manifestText.value = JSON.stringify(sampleManifest, null, 2);
 restoreRememberedInputs();
+saveExperienceBtn.disabled = !experienceSummaryText.value.trim();
 const storedCommonTables = readJsonStorage("commonTables", []);
 commonTablesInput.value = storedCommonTables.join("\n");
 applyTargetTablesToManifest();

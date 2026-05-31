@@ -8,7 +8,7 @@ from typing import Any
 
 from .ai_context import build_minimal_context, summarize_analysis
 from .config_discovery import discover_config_tables
-from .draft import call_baseai, call_draft_diagnostics_ai, call_relationship_ai, make_stub_patch
+from .draft import call_baseai, call_draft_diagnostics_ai, call_experience_summary_ai, call_relationship_ai, make_stub_patch
 from .draft_diagnostics import (
     build_draft_diagnostics,
     compact_draft_diagnostic_context,
@@ -18,6 +18,8 @@ from .experience import (
     append_case_from_patch,
     build_experience_context,
     experience_context_payload,
+    merge_experience_summary,
+    summarize_experience_locally,
     teach_experience,
 )
 from .habits import append_habit, habit_from_patch, load_habits, match_habits
@@ -147,6 +149,57 @@ def cmd_teach(args: argparse.Namespace) -> int:
         project = _load_manifest(manifest_path).project
     result = teach_experience(base_dir, project, args.text, source=args.source)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_experience_summary(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    manifest_path = Path(args.manifest)
+    if not manifest_path.is_absolute():
+        manifest_path = base_dir / manifest_path
+    manifest = _load_manifest(manifest_path)
+    run_dir = make_run_dir(_run_root(base_dir, manifest), "experience-summary")
+    local_summary = summarize_experience_locally(manifest.project, args.text)
+    ai_summary = None
+    ai_error = None
+    if not args.no_ai:
+        try:
+            schema_tables: list[str] = []
+            try:
+                schema = load_schema(_schema_path(base_dir, manifest))
+                schema_tables = sorted(schema.tables.keys())[:300]
+            except Exception:
+                schema_tables = []
+            ai_summary = call_experience_summary_ai(
+                manifest,
+                {
+                    "project": manifest.project,
+                    "raw_experience": args.text,
+                    "target_tables": manifest.target_tables,
+                    "schema_tables": schema_tables,
+                    "local_parse": local_summary.get("records_preview", {}),
+                    "instruction": "整理成用户确认后可保存的配表经验，不要生成 patch，不要写表。",
+                },
+                run_dir / "experience-summary-ai-response.json",
+            )
+        except Exception as exc:  # noqa: BLE001 - local summary keeps the teaching flow usable without AI.
+            ai_error = str(exc)
+    summary = merge_experience_summary(manifest.project, args.text, local_summary, ai_summary, ai_error)
+    write_json(run_dir / "experience-summary.json", summary)
+    print(
+        json.dumps(
+            {
+                "run_dir": str(run_dir),
+                "experience_summary": str(run_dir / "experience-summary.json"),
+                "mode": summary["mode"],
+                "summary_title": summary["summary_title"],
+                "question_count": len(summary.get("questions", [])),
+                "ai_error": summary.get("ai_error"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -394,6 +447,12 @@ def build_parser() -> argparse.ArgumentParser:
     teach.add_argument("--text", required=True)
     teach.add_argument("--source", default="manual")
     teach.set_defaults(func=cmd_teach)
+
+    experience_summary = sub.add_parser("experience-summary")
+    experience_summary.add_argument("--manifest", required=True)
+    experience_summary.add_argument("--text", required=True)
+    experience_summary.add_argument("--no-ai", action="store_true")
+    experience_summary.set_defaults(func=cmd_experience_summary)
 
     plan = sub.add_parser("plan")
     plan.add_argument("--manifest", required=True)

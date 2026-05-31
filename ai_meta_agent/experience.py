@@ -267,6 +267,60 @@ def parse_experience_text(project: str, text: str, source: str = "manual", times
     }
 
 
+def summarize_experience_locally(project: str, text: str, source: str = "summary_preview") -> dict[str, Any]:
+    text = text.strip()
+    if not text:
+        raise ValueError("经验内容不能为空")
+    records = parse_experience_text(project, text, source=source)
+    table_names = _extract_table_names(text)
+    scenario_tags = _scenario_tags(text)
+    review_text = _render_review_text(
+        title=_summary_title(text, scenario_tags),
+        raw_text=text,
+        table_names=table_names,
+        scenario_tags=scenario_tags,
+        field_mappings=records["field_mappings"],
+        questions=_local_questions(records, text),
+    )
+    return {
+        "mode": "local",
+        "summary_title": _summary_title(text, scenario_tags),
+        "review_text": review_text,
+        "activity_templates": records["activity_templates"],
+        "field_mappings": records["field_mappings"],
+        "personal_rules": records["rules"],
+        "questions": _local_questions(records, text),
+        "risk_notes": ["保存前请确认这些规则只影响待审核草案，不会直接写配置表。"],
+        "records_preview": records,
+    }
+
+
+def merge_experience_summary(project: str, raw_text: str, local_summary: dict[str, Any], ai_summary: dict[str, Any] | None = None, ai_error: str | None = None) -> dict[str, Any]:
+    if not ai_summary:
+        result = dict(local_summary)
+        if ai_error:
+            result["ai_error"] = ai_error
+            result["risk_notes"] = [*result.get("risk_notes", []), "真实 AI 整理失败，当前展示的是本地规则整理结果。"]
+        return result
+
+    review_text = str(ai_summary.get("review_text") or "").strip()
+    if not review_text:
+        review_text = _render_ai_review_text(raw_text, ai_summary)
+    records = parse_experience_text(project, review_text, source="ai_summary_preview")
+    return {
+        "mode": "ai",
+        "summary_title": str(ai_summary.get("summary_title") or local_summary.get("summary_title") or _summary_title(raw_text, [])),
+        "review_text": review_text,
+        "activity_templates": _list_of_dicts(ai_summary.get("activity_templates")),
+        "field_mappings": _list_of_dicts(ai_summary.get("field_mappings")),
+        "personal_rules": _list_of_dicts(ai_summary.get("personal_rules")),
+        "questions": _string_list(ai_summary.get("questions")),
+        "risk_notes": _string_list(ai_summary.get("risk_notes")) or local_summary.get("risk_notes", []),
+        "records_preview": records,
+        "local_preview": local_summary,
+    }
+
+
 def build_experience_context(
     base_dir: Path,
     manifest: Manifest,
@@ -408,6 +462,92 @@ def experience_context_payload(experience: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _summary_title(text: str, scenario_tags: list[str]) -> str:
+    if scenario_tags:
+        return f"{scenario_tags[0]} 配表经验"
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), text.strip())
+    return first_line[:32] or "配表经验"
+
+
+def _render_review_text(
+    title: str,
+    raw_text: str,
+    table_names: list[str],
+    scenario_tags: list[str],
+    field_mappings: list[dict[str, Any]],
+    questions: list[str],
+) -> str:
+    lines = [
+        f"经验标题：{title}",
+        "",
+        "适用场景：",
+        *(f"- {tag}" for tag in scenario_tags[:8]),
+    ]
+    if not scenario_tags:
+        lines.append("- 待确认活动类型")
+    lines.extend(["", "相关配置表："])
+    if table_names:
+        lines.extend(f"- {name}" for name in table_names[:20])
+    else:
+        lines.append("- 待补充")
+    lines.extend(["", "字段映射："])
+    if field_mappings:
+        for mapping in field_mappings[:20]:
+            aliases = " / ".join(mapping.get("source_aliases", [])[:4]) or "规划字段"
+            lines.append(f"- {aliases} -> {mapping.get('target_table')}.{mapping.get('target_field')}")
+    else:
+        lines.append("- 待补充，例如：规划里的商品名 -> goods.name")
+    lines.extend(["", "个人规则：", f"- {raw_text.strip()}"])
+    if questions:
+        lines.extend(["", "保存前待确认：", *(f"- {item}" for item in questions)])
+    return "\n".join(lines).strip()
+
+
+def _render_ai_review_text(raw_text: str, ai_summary: dict[str, Any]) -> str:
+    title = str(ai_summary.get("summary_title") or "配表经验").strip()
+    lines = [f"经验标题：{title}", "", "个人规则：", f"- {raw_text.strip()}"]
+    templates = _list_of_dicts(ai_summary.get("activity_templates"))
+    if templates:
+        lines.extend(["", "活动模板："])
+        for template in templates[:8]:
+            name = template.get("name") or template.get("template_id") or "未命名模板"
+            tables = ", ".join(_string_list(template.get("target_tables")))
+            lines.append(f"- {name}：{tables}")
+    mappings = _list_of_dicts(ai_summary.get("field_mappings"))
+    if mappings:
+        lines.extend(["", "字段映射："])
+        for mapping in mappings[:20]:
+            aliases = " / ".join(_string_list(mapping.get("source_aliases"))[:4]) or "规划字段"
+            lines.append(f"- {aliases} -> {mapping.get('target_table')}.{mapping.get('target_field')}")
+    questions = _string_list(ai_summary.get("questions"))
+    if questions:
+        lines.extend(["", "保存前待确认：", *(f"- {item}" for item in questions)])
+    return "\n".join(lines).strip()
+
+
+def _local_questions(records: dict[str, list[dict[str, Any]]], text: str) -> list[str]:
+    questions = []
+    if not records.get("activity_templates"):
+        questions.append("这条经验对应哪类活动模板？例如兑换商店、积分任务、礼包、排行榜。")
+    if not records.get("field_mappings") and "->" not in text:
+        questions.append("是否有规划列名到配置字段的映射？建议写成：规划列名 -> table.field。")
+    if not _extract_table_names(text):
+        questions.append("这条经验适用于哪些配置表？")
+    return questions
+
+
+def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
 def _match_templates(templates: list[dict[str, Any]], signals: dict[str, Any], target_tables: set[str]) -> list[dict[str, Any]]:
     text = signals.get("normalized_text", "")
     scored = []
@@ -498,6 +638,26 @@ def _match_cases(cases: list[dict[str, Any]], project: str, signals: dict[str, A
 
 def _parse_explicit_mappings(project: str, text: str, timestamp: str, source: str) -> list[dict[str, Any]]:
     mappings = []
+    arrow_pattern = re.compile(r"([\u4e00-\u9fffA-Za-z0-9_/\- ]{1,32})\s*(?:->|=>|映射到|对应到|maps?\s+to)\s*([A-Za-z][A-Za-z0-9_]*)[.\s。．]+([\u4e00-\u9fffA-Za-z0-9_]{1,48})", re.IGNORECASE)
+    for match in arrow_pattern.finditer(text):
+        alias = match.group(1).strip(" ：:，,。.")
+        table = match.group(2).strip()
+        field = match.group(3).strip(" ：:，,。.")
+        if not alias or not table or not field:
+            continue
+        mappings.append(
+            {
+                "mapping_id": _stable_id("mapping", project, alias, table, field, timestamp),
+                "project": project,
+                "source_aliases": [alias],
+                "target_table": table,
+                "target_field": field,
+                "confidence": 0.84,
+                "source": source,
+                "evidence": [text[:160]],
+                "created_at": timestamp,
+            }
+        )
     pattern = re.compile(r"([\u4e00-\u9fa5A-Za-z0-9_/\- ]{1,24})\s*(?:通常|一般|可以|要)?\s*对应\s*([A-Za-z][A-Za-z0-9_]*)[.。\s]+([\u4e00-\u9fa5A-Za-z0-9_]{1,32})")
     for match in pattern.finditer(text):
         alias = match.group(1).strip(" ，,。")
