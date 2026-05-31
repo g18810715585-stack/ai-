@@ -377,6 +377,7 @@ function collectArtifact(result) {
   }
   const artifact = {};
   if (parsed.patch) artifact.patch = maybeReadJson(parsed.patch);
+  if (parsed.config_plan) artifact.configPlan = maybeReadJson(parsed.config_plan);
   if (parsed.draft_diagnostics) artifact.draftDiagnostics = maybeReadJson(parsed.draft_diagnostics);
   if (parsed.result) artifact.result = maybeReadJson(parsed.result);
   if (parsed.relationship_map) artifact.relationshipMap = maybeReadJson(parsed.relationship_map);
@@ -385,6 +386,7 @@ function collectArtifact(result) {
   if (parsed.run_dir) {
     artifact.analysis = summarizeAnalysis(path.join(parsed.run_dir, "analysis.json"));
     artifact.relationshipMap = artifact.relationshipMap || maybeReadJson(path.join(parsed.run_dir, "relationship-map.json"));
+    artifact.configPlan = artifact.configPlan || maybeReadJson(path.join(parsed.run_dir, "config-plan.json"));
     artifact.draftDiagnostics = artifact.draftDiagnostics || maybeReadJson(path.join(parsed.run_dir, "draft-diagnostics.json"));
     artifact.diff = maybeReadJson(path.join(parsed.run_dir, "diff.json"));
     artifact.validation = maybeReadJson(path.join(parsed.run_dir, "validation.json"));
@@ -432,6 +434,10 @@ async function handleApi(req, res, projectRoot) {
   let args;
   if (url.pathname === "/api/analyze") {
     args = ["analyze", "--manifest", manifestPath];
+  } else if (url.pathname === "/api/teach") {
+    args = ["teach", "--manifest", manifestPath, "--text", payload.experience_text || "", "--source", "panel"];
+  } else if (url.pathname === "/api/activity-plan") {
+    args = ["plan", "--manifest", manifestPath];
   } else if (url.pathname === "/api/schema-scan") {
     args = ["schema-scan", "--manifest", manifestPath];
   } else if (url.pathname === "/api/relations") {

@@ -15,10 +15,11 @@ from openpyxl.styles import PatternFill
 from ai_meta_agent.cli import analyze_manifest
 from ai_meta_agent.draft import call_baseai, call_draft_diagnostics_ai, call_relationship_ai, make_stub_patch
 from ai_meta_agent.draft_diagnostics import build_draft_diagnostics, compact_draft_diagnostic_context
+from ai_meta_agent.experience import append_case_from_patch, build_experience_context, teach_experience
 from ai_meta_agent.feishu import FeishuSourcePayload
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
 from ai_meta_agent.io_utils import read_json, write_json
-from ai_meta_agent.models import Manifest, Patch, PlanningSource
+from ai_meta_agent.models import Manifest, Patch, PlanningSource, SchemaBundle, SheetIR, SourceKind, WorkbookIR
 from ai_meta_agent.patch_engine import apply_patch
 from ai_meta_agent.relation_scanner import scan_relationships, split_reference_values
 from ai_meta_agent.schema import load_schema
@@ -176,6 +177,104 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(len(habits), 1)
             matched = match_habits(habits, "unit-sample", ["shop_pack_config"])
             self.assertEqual(matched[0].habit_id, habit.habit_id)
+
+    def test_teach_experience_writes_local_knowledge(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            result = teach_experience(
+                tmp,
+                "lesson-sample",
+                "exchange shop activity usually uses activity, active_shop, exchange, reward, goods and key. "
+                "planning item_id is a goods id, price maps to exchange price, reward maps to reward id.",
+            )
+            self.assertEqual(result["created"]["rules"], 1)
+            self.assertGreaterEqual(result["created"]["activity_templates"], 1)
+            self.assertGreaterEqual(result["created"]["field_mappings"], 2)
+            self.assertTrue((tmp / ".knowledge" / "rules.jsonl").exists())
+            self.assertTrue((tmp / ".knowledge" / "activity_templates.jsonl").read_text(encoding="utf-8").strip())
+
+    def test_activity_template_matching_builds_config_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            manifest = Manifest.model_validate(
+                {
+                    "project": "plan-sample",
+                    "mode": "supervised_write",
+                    "schema_path": "schema.json",
+                    "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "planning.xlsx", "role": "planning"}],
+                    "target_tables": ["activity"],
+                }
+            )
+            schema = SchemaBundle.model_validate(
+                {
+                    "tables": {
+                        "activity": {"primary_key": ["id"], "fields": {"id": {}, "title": {}, "form_list": {}}},
+                        "active_shop": {"primary_key": ["id"], "fields": {"id": {}, "group": {}, "goods": {}}},
+                        "exchange": {"primary_key": ["id"], "fields": {"id": {}, "activity_id": {}, "price": {}}},
+                        "reward": {"primary_key": ["id"], "fields": {"id": {}}},
+                        "goods": {"primary_key": ["item_id"], "fields": {"item_id": {}, "name": {}}},
+                        "key": {"primary_key": ["key"], "fields": {"key": {}, "text": {}}},
+                    }
+                }
+            )
+            workbook = WorkbookIR(
+                source_id="plan",
+                source_type=SourceKind.LOCAL_EXCEL,
+                sheets=[
+                    SheetIR(
+                        name="exchange shop planning",
+                        max_row=3,
+                        max_column=3,
+                        header_row=1,
+                        headers=["item_id", "price", "reward"],
+                        sample_rows=[{"item_id": 3001, "price": 68, "reward": "3001*10"}],
+                    )
+                ],
+            )
+            experience = build_experience_context(
+                tmp,
+                manifest,
+                schema,
+                [workbook],
+                {"recommended_tables": ["active_shop", "reward"], "relations": []},
+            )
+            plan = experience["config_plan"]
+            self.assertIn("exchange", plan["activity_template_id"])
+            self.assertIn("active_shop", plan["all_recommended_tables"])
+            self.assertIn("reward", plan["all_recommended_tables"])
+            self.assertTrue(plan["matched_field_mappings"])
+            self.assertTrue(plan["pending_confirmations"])
+
+    def test_patch_learning_also_records_case_example(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "case-sample",
+                "mode": "supervised_write",
+                "schema_path": "schema.json",
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "planning.xlsx", "role": "planning"}],
+            }
+        )
+        patch_obj = Patch(
+            patch_id="patch_case",
+            project="case-sample",
+            operations=[
+                {
+                    "op": "update",
+                    "target_table": "activity",
+                    "match": {"id": 1},
+                    "set": {"title": "demo"},
+                    "reason": "unit test",
+                    "confidence": 0.8,
+                    "risk_level": "low",
+                }
+            ],
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            case = append_case_from_patch(tmp, manifest, patch_obj, "accepted", "kept title style")
+            cases = [json.loads(line) for line in (tmp / ".knowledge" / "case_examples.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(case["target_tables"], ["activity"])
+        self.assertEqual(cases[0]["decision"], "accepted")
 
     def test_config_root_discovers_tables(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

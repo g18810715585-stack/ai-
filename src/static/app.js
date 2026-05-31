@@ -2,11 +2,14 @@ const manifestText = document.querySelector("#manifestText");
 const patchText = document.querySelector("#patchText");
 const diagnosticsText = document.querySelector("#diagnosticsText");
 const relationsText = document.querySelector("#relationsText");
+const planText = document.querySelector("#planText");
+const confirmationsText = document.querySelector("#confirmationsText");
 const resultText = document.querySelector("#resultText");
 const rawText = document.querySelector("#rawText");
 const statusEl = document.querySelector("#status");
 const configDirInput = document.querySelector("#configDir");
 const planningFeishuUrlInput = document.querySelector("#planningFeishuUrl");
+const experienceText = document.querySelector("#experienceText");
 const aiStatusText = document.querySelector("#aiStatusText");
 const aiProviderSelect = document.querySelector("#aiProvider");
 const targetTablesSummary = document.querySelector("#targetTablesSummary");
@@ -108,7 +111,8 @@ let pendingTargetSelection = new Set();
 
 const rememberedFields = [
   ["configDir", configDirInput],
-  ["planningFeishuUrl", planningFeishuUrlInput]
+  ["planningFeishuUrl", planningFeishuUrlInput],
+  ["experienceText", experienceText]
 ];
 
 function storageKey(name) {
@@ -153,7 +157,7 @@ function setStatus(text, state = "") {
 // Only the clicked workflow button stays enabled while a long backend action runs.
 function setActionBusy(button, label, busy) {
   if (!button) return;
-  const actionButtons = Array.from(document.querySelectorAll(".actions button"));
+  const actionButtons = Array.from(document.querySelectorAll(".actions button, .experience-actions button"));
   if (busy) {
     button.dataset.originalText = button.dataset.originalText || button.textContent;
     button.textContent = `正在${label}...`;
@@ -619,6 +623,57 @@ function compactDraftDiagnostics(data) {
   return data.artifact?.draftDiagnostics || null;
 }
 
+function compactConfigPlan(data) {
+  return data.artifact?.configPlan || data.config_plan || null;
+}
+
+function renderPlanArtifact(data) {
+  const plan = compactConfigPlan(data);
+  if (!plan) return null;
+  planText.textContent = formatConfigPlan(plan);
+  confirmationsText.textContent = formatConfirmations(plan);
+  return plan;
+}
+
+function formatConfigPlan(plan) {
+  if (!plan) return "暂无配表计划。";
+  const lines = [];
+  lines.push("配表计划");
+  lines.push("");
+  lines.push(`活动模板：${plan.activity_type || "未识别"}`);
+  lines.push(`置信度：${formatConfidence(plan.confidence)}`);
+  if (plan.relation_chain?.length) {
+    lines.push(`推荐链路：${plan.relation_chain.join(" -> ")}`);
+  }
+  appendList(lines, "建议补选配置表", plan.recommended_target_tables);
+  appendList(lines, "本次完整建议表", plan.all_recommended_tables);
+  appendRequiredFields(lines, plan.required_fields);
+  appendMatchedMappings(lines, plan.matched_field_mappings);
+  appendMatchedRules(lines, plan.matched_rules);
+  appendSimilarCases(lines, plan.similar_cases);
+  appendList(lines, "缺失信息", plan.missing_information);
+  appendList(lines, "下一步", plan.next_steps || defaultPlanNextSteps(plan));
+  if (plan.safety) {
+    lines.push("安全边界");
+    lines.push(`- ${plan.safety}`);
+  }
+  return lines.join("\n").trim();
+}
+
+function formatConfirmations(plan) {
+  const confirmations = plan?.pending_confirmations || [];
+  if (!confirmations.length) {
+    return "暂无待确认字段。高风险和低置信字段仍会在生成草案时继续进入审核。";
+  }
+  const lines = ["待确认字段", ""];
+  for (const item of confirmations) {
+    const aliases = item.source_aliases?.length ? item.source_aliases.join(" / ") : "未命名规划字段";
+    lines.push(`- ${aliases} -> ${item.target_table || "?"}.${item.target_field || "?"}`);
+    lines.push(`  置信度：${formatConfidence(item.confidence)}；原因：${item.reason || "需要人工确认"}`);
+  }
+  return lines.join("\n");
+}
+
 function formatDraftDiagnostics(diagnostics) {
   if (!diagnostics) return "暂无草案诊断。";
   const lines = [];
@@ -631,6 +686,18 @@ function formatDraftDiagnostics(diagnostics) {
   appendList(lines, "原因", diagnostics.reasons);
   appendList(lines, "缺少的信息", diagnostics.missing_information);
   appendList(lines, "建议勾选的关联表", diagnostics.suggested_target_tables);
+  if (diagnostics.config_plan) {
+    const plan = diagnostics.config_plan;
+    lines.push("配表计划摘要");
+    lines.push(`- 活动模板：${plan.activity_type || "未识别"}`);
+    if (plan.recommended_target_tables?.length) {
+      lines.push(`- 建议补选：${plan.recommended_target_tables.join(", ")}`);
+    }
+    if (plan.pending_confirmations?.length) {
+      lines.push(`- 待确认字段：${plan.pending_confirmations.length}`);
+    }
+    lines.push("");
+  }
   appendFieldMappings(lines, diagnostics.suggested_field_mappings);
   if (diagnostics.relationship_summary) {
     lines.push("关联关系摘要");
@@ -657,6 +724,58 @@ function formatDraftDiagnostics(diagnostics) {
     lines.push(diagnostics.ai_reason);
   }
   return lines.join("\n");
+}
+
+function appendRequiredFields(lines, requiredFields) {
+  const entries = Object.entries(requiredFields || {});
+  if (!entries.length) return;
+  lines.push("模板必填字段");
+  for (const [table, fields] of entries.slice(0, 10)) {
+    lines.push(`- ${table}: ${(fields || []).join(", ")}`);
+  }
+  lines.push("");
+}
+
+function appendMatchedMappings(lines, mappings) {
+  if (!mappings?.length) return;
+  lines.push("命中的字段映射");
+  for (const mapping of mappings.slice(0, 12)) {
+    const aliases = mapping.matched_aliases?.length ? mapping.matched_aliases.join(" / ") : (mapping.source_aliases || []).slice(0, 3).join(" / ");
+    lines.push(`- ${aliases || "规划字段"} -> ${mapping.target_table}.${mapping.target_field}（${formatConfidence(mapping.confidence)}）`);
+  }
+  lines.push("");
+}
+
+function appendMatchedRules(lines, rules) {
+  if (!rules?.length) return;
+  lines.push("命中的个人规则");
+  for (const rule of rules.slice(0, 8)) {
+    lines.push(`- ${rule.title || rule.text || rule.rule_id}（${formatConfidence(rule.match_score || rule.confidence)}）`);
+  }
+  lines.push("");
+}
+
+function appendSimilarCases(lines, cases) {
+  if (!cases?.length) return;
+  lines.push("相似历史案例");
+  for (const item of cases.slice(0, 6)) {
+    lines.push(`- ${item.patch_id || item.case_id}: ${item.decision || "case"}，${item.operation_count || 0} 个操作`);
+  }
+  lines.push("");
+}
+
+function formatConfidence(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) return "待确认";
+  return `${Math.round(number * 100)}%`;
+}
+
+function defaultPlanNextSteps(plan) {
+  const steps = [];
+  if (plan?.recommended_target_tables?.length) steps.push("把建议补选配置表加入本次目标表后重新分析关联关系。");
+  if (plan?.missing_information?.length) steps.push("补充缺失信息或写入一条经验规则。");
+  if (!steps.length) steps.push("确认配表计划后生成待审核草案。");
+  return steps;
 }
 
 function appendList(lines, title, values) {
@@ -801,6 +920,34 @@ document.querySelector("#relationsBtn").addEventListener("click", (event) => run
   showTab("relations");
 }));
 
+document.querySelector("#teachBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+  const text = experienceText.value.trim();
+  if (!text) throw new Error("请先写入一条配表经验");
+  const payload = await buildPayload();
+  payload.experience_text = text;
+  const data = await callApi("/api/teach", payload, { label });
+  const summary = parseStdout(data);
+  resultText.textContent = JSON.stringify(
+    {
+      store: summary.store,
+      created: summary.created,
+      hint: "经验已写入本地 .knowledge，后续识别模板和生成草案会自动参考。"
+    },
+    null,
+    2
+  );
+  showTab("result");
+}));
+
+document.querySelector("#activityPlanBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+  const payload = await buildPayload();
+  ensurePlanningSource(payload.manifest);
+  const data = await callApi("/api/activity-plan", payload, { label });
+  const plan = renderPlanArtifact(data);
+  resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
+  showTab(plan?.pending_confirmations?.length ? "confirmations" : "plan");
+}));
+
 document.querySelector("#analyzeBtn").addEventListener("click", (event) => runAction(event, async (label) => {
   ensureTargetTablesSelected();
   const payload = await buildPayload();
@@ -809,6 +956,7 @@ document.querySelector("#analyzeBtn").addEventListener("click", (event) => runAc
   if (data.artifact?.relationshipMap) {
     relationsText.textContent = JSON.stringify(compactRelationshipMap(data), null, 2);
   }
+  renderPlanArtifact(data);
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   showTab("result");
 }));
@@ -836,6 +984,7 @@ document.querySelector("#draftBtn").addEventListener("click", (event) => runActi
   if (data.artifact?.relationshipMap) {
     relationsText.textContent = JSON.stringify(compactRelationshipMap(data), null, 2);
   }
+  renderPlanArtifact(data);
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   const operationCount = data.artifact?.patch?.operations?.length || 0;
   if (operationCount === 0 && diagnostics) {

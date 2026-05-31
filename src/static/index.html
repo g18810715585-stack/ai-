@@ -40,6 +40,17 @@
           <button id="openTargetDialog" type="button">选择配置表</button>
         </section>
 
+        <section class="experience-entry">
+          <label>
+            经验录入
+            <textarea id="experienceText" spellcheck="false" placeholder="例如：兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key。规划里商品名通常对应 goods 道具名，价格列对应 exchange 支付价格。"></textarea>
+          </label>
+          <div class="experience-actions">
+            <button id="teachBtn" type="button">写入经验</button>
+            <button id="activityPlanBtn" type="button">识别活动模板</button>
+          </div>
+        </section>
+
         <textarea id="manifestText" class="internal-manifest" spellcheck="false" aria-hidden="true" hidden></textarea>
 
         <div class="mode-row">
@@ -74,6 +85,8 @@
       <section class="panel review-panel">
         <div class="tabs">
           <button class="tab active" data-tab="patch">变更 Patch</button>
+          <button class="tab" data-tab="plan">配表计划</button>
+          <button class="tab" data-tab="confirmations">待确认字段</button>
           <button class="tab" data-tab="diagnostics">草案诊断</button>
           <button class="tab" data-tab="relations">关联关系</button>
           <button class="tab" data-tab="result">执行结果</button>
@@ -82,6 +95,12 @@
 
         <div id="patchTab" class="tab-content active">
           <textarea id="patchText" spellcheck="false"></textarea>
+        </div>
+        <div id="planTab" class="tab-content">
+          <pre id="planText"></pre>
+        </div>
+        <div id="confirmationsTab" class="tab-content">
+          <pre id="confirmationsText"></pre>
         </div>
         <div id="diagnosticsTab" class="tab-content">
           <pre id="diagnosticsText"></pre>

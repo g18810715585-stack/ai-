@@ -50,6 +50,8 @@ function help() {
 Usage:
   node src/cli.mjs server [--port 4321]
   node src/cli.mjs schema-scan --manifest fixtures/sample.manifest.json
+  node src/cli.mjs teach --manifest fixtures/sample.manifest.json --text "兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key"
+  node src/cli.mjs plan --manifest fixtures/sample.manifest.json
   node src/cli.mjs relations --manifest fixtures/sample.manifest.json
   node src/cli.mjs analyze --manifest fixtures/sample.manifest.json
   node src/cli.mjs draft --manifest fixtures/sample.manifest.json [--stub]
@@ -70,7 +72,7 @@ async function main() {
     await startServer({ port, projectRoot, openBrowser: rest.includes("--open") });
     return 0;
   }
-  if (["analyze", "schema-scan", "relations", "draft", "apply", "learn"].includes(command)) {
+  if (["analyze", "schema-scan", "teach", "plan", "relations", "draft", "apply", "learn"].includes(command)) {
     return runPython([command, ...rest]);
   }
   console.error(`Unknown command: ${command}`);

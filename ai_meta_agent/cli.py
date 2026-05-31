@@ -14,6 +14,12 @@ from .draft_diagnostics import (
     compact_draft_diagnostic_context,
     extract_ai_reasoning,
 )
+from .experience import (
+    append_case_from_patch,
+    build_experience_context,
+    experience_context_payload,
+    teach_experience,
+)
 from .habits import append_habit, habit_from_patch, load_habits, match_habits
 from .io_utils import make_run_dir, read_json, write_json, write_text
 from .models import Manifest, Patch
@@ -96,7 +102,8 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
             source_errors.append({"source_id": source.id, "kind": source.kind, "message": str(exc)})
     habits = load_habits(_habit_path(base_dir, manifest))
     matched = match_habits(habits, manifest.project, list(schema.tables.keys()))
-    context = build_minimal_context(manifest, schema, workbooks, matched)
+    experience = build_experience_context(base_dir, manifest, schema, workbooks, relationship_map)
+    context = build_minimal_context(manifest, schema, workbooks, matched, experience_context_payload(experience))
     context["source_errors"] = source_errors
     context["config_discovery"] = config_discovery
     context["relationship_map"] = compact_relationship_context(relationship_map)
@@ -109,9 +116,12 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
         "matched_habits": [habit.model_dump(mode="json", exclude_none=True) for habit in matched],
         "config_discovery": config_discovery,
         "relationship_map": relationship_map,
+        "experience": experience,
+        "config_plan": experience["config_plan"],
     }
     write_json(run_dir / "analysis.json", analysis)
     write_json(run_dir / "ai-context.json", context)
+    write_json(run_dir / "config-plan.json", experience["config_plan"])
     write_text(run_dir / "analysis.md", summarize_analysis(workbooks, schema, matched))
     return manifest, schema, run_dir, context
 
@@ -123,6 +133,36 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         manifest_path = base_dir / manifest_path
     _, _, run_dir, analysis_context = analyze_manifest(manifest_path, base_dir, "analysis")
     output = {"run_dir": str(run_dir), "source_errors": analysis_context.get("source_errors", [])}
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_teach(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    project = args.project
+    if args.manifest:
+        manifest_path = Path(args.manifest)
+        if not manifest_path.is_absolute():
+            manifest_path = base_dir / manifest_path
+        project = _load_manifest(manifest_path).project
+    result = teach_experience(base_dir, project, args.text, source=args.source)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    manifest_path = Path(args.manifest)
+    if not manifest_path.is_absolute():
+        manifest_path = base_dir / manifest_path
+    _, _, run_dir, context = analyze_manifest(manifest_path, base_dir, "config-plan")
+    output = {
+        "run_dir": str(run_dir),
+        "config_plan": str(run_dir / "config-plan.json"),
+        "activity_type": context.get("config_plan", {}).get("activity_type"),
+        "recommended_target_tables": context.get("config_plan", {}).get("recommended_target_tables", []),
+        "pending_confirmations": len(context.get("config_plan", {}).get("pending_confirmations", [])),
+    }
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
 
@@ -324,7 +364,18 @@ def cmd_learn(args: argparse.Namespace) -> int:
     patch = Patch.model_validate(read_json(patch_path))
     habit = habit_from_patch(patch, args.decision, args.note)
     append_habit(_habit_path(base_dir, manifest), habit)
-    print(json.dumps({"habit_id": habit.habit_id, "store": str(_habit_path(base_dir, manifest))}, ensure_ascii=False, indent=2))
+    case = append_case_from_patch(base_dir, manifest, patch, args.decision, args.note)
+    print(
+        json.dumps(
+            {
+                "habit_id": habit.habit_id,
+                "case_id": case["case_id"],
+                "store": str(_habit_path(base_dir, manifest)),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -336,6 +387,17 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = sub.add_parser("analyze")
     analyze.add_argument("--manifest", required=True)
     analyze.set_defaults(func=cmd_analyze)
+
+    teach = sub.add_parser("teach")
+    teach.add_argument("--manifest", default=None)
+    teach.add_argument("--project", default="default")
+    teach.add_argument("--text", required=True)
+    teach.add_argument("--source", default="manual")
+    teach.set_defaults(func=cmd_teach)
+
+    plan = sub.add_parser("plan")
+    plan.add_argument("--manifest", required=True)
+    plan.set_defaults(func=cmd_plan)
 
     schema_scan = sub.add_parser("schema-scan")
     schema_scan.add_argument("--manifest", required=True)

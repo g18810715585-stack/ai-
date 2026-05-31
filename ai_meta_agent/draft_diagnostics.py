@@ -61,6 +61,7 @@ def compact_draft_diagnostic_context(manifest: Manifest, context: dict[str, Any]
             for table_name, table in (context.get("schema", {}).get("tables") or {}).items()
         },
         "relationship_map": _compact_relationship_map(context.get("relationship_map") or {}),
+        "config_plan": context.get("config_plan", {}),
         "source_errors": context.get("source_errors", []),
     }
 
@@ -88,6 +89,7 @@ def build_draft_diagnostics(
         }
 
     relation_map = context.get("relationship_map") or {}
+    config_plan = context.get("config_plan") or {}
     target_tables = context.get("target_tables", [])
     recommended = [name for name in relation_map.get("recommended_tables", []) if name not in target_tables]
     schema_tables = context.get("schema", {}).get("tables") or {}
@@ -113,6 +115,8 @@ def build_draft_diagnostics(
     ]
     if recommended:
         missing.append("是否把推荐关联表纳入本次草案生成范围。")
+    if config_plan.get("missing_information"):
+        missing.extend(config_plan["missing_information"])
 
     return {
         "status": "empty",
@@ -128,6 +132,7 @@ def build_draft_diagnostics(
             "high_confidence_count": relation_map.get("summary", {}).get("high_confidence_count", 0),
             "recommended_tables": relation_map.get("recommended_tables", [])[:20],
         },
+        "config_plan": config_plan,
         "next_steps": [
             "先把推荐关联表中本次活动会实际写入的表勾选进目标配置表。",
             "在飞书规划里补一段字段映射说明，例如：活动 ID -> activity.id，商品组 -> active_shop.group，奖励 -> reward.id。",

@@ -27,9 +27,15 @@ def _relationship_candidates(schema: SchemaBundle) -> list[dict[str, str]]:
     return candidates
 
 
-def build_minimal_context(manifest: Manifest, schema: SchemaBundle, workbooks: list[WorkbookIR], habits: list[Habit]) -> dict[str, Any]:
+def build_minimal_context(
+    manifest: Manifest,
+    schema: SchemaBundle,
+    workbooks: list[WorkbookIR],
+    habits: list[Habit],
+    experience: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     table_names = list(schema.tables.keys())
-    return {
+    context = {
         "project": manifest.project,
         "mode": manifest.mode,
         "instructions": [
@@ -82,6 +88,17 @@ def build_minimal_context(manifest: Manifest, schema: SchemaBundle, workbooks: l
         "matched_habits": habit_context(habits),
         "target_tables": table_names,
     }
+    if experience:
+        context.update(
+            {
+                "matched_activity_templates": experience.get("matched_activity_templates", []),
+                "matched_field_mappings": experience.get("matched_field_mappings", []),
+                "matched_rules": experience.get("matched_rules", []),
+                "similar_cases": experience.get("similar_cases", []),
+                "config_plan": experience.get("config_plan", {}),
+            }
+        )
+    return context
 
 
 def summarize_analysis(workbooks: list[WorkbookIR], schema: SchemaBundle, matched_habits: list[Habit]) -> str:

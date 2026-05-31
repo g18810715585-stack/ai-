@@ -118,12 +118,32 @@ Windows 也可以直接启动面板：
 http://127.0.0.1:4321
 ```
 
+## 经验教学
+
+经验教学分三步使用：
+
+1. 在面板“经验录入”里写一条自然语言规则，然后点“写入经验”。经验会保存到本地 `.knowledge`，默认不进 Git。
+2. 填好飞书规划链接、配置表目录，并选择这次活动的主要目标配置表后，点“识别活动模板”。工具会输出“配表计划”和“待确认字段”。
+3. 确认计划后再点“分析关联关系”和“生成草案”。草案只会生成待审核 Patch，低置信字段会进“待确认字段”，不会硬写。
+
+CLI 也可以录入经验和生成配表计划：
+
+```powershell
+node src/cli.mjs teach --manifest fixtures/sample.manifest.json --text "兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key"
+node src/cli.mjs plan --manifest fixtures/sample.manifest.json
+```
+
+知识库文件分开保存在 `.knowledge/rules.jsonl`、`.knowledge/activity_templates.jsonl`、`.knowledge/field_mappings.jsonl` 和 `.knowledge/case_examples.jsonl`。审核草案后运行 `learn` 会同时记录习惯和案例证据，后续相似活动会优先复用。
+
 ## CLI
 
 ```text
 server   启动本地网页面板
 analyze  读取 manifest，生成 Workbook IR 和最小 AI 上下文
 schema-scan  扫描配置表目录，生成 Schema 草案和配置 sheet 报告
+relations  分析已选目标表的一跳/二跳关联关系
+teach    写入一条自然语言配表经验到本地知识库
+plan     识别活动模板并生成配表计划
 draft    生成配置 patch，可调用公司 BI，也可使用 --stub 本地草案
 apply    执行 patch，生成 preview、diff、validation、rollback
 learn    把人工确认或修正沉淀为习惯记录
