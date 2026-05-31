@@ -18,11 +18,16 @@ class WorkbookState:
 
 
 def _headers(sheet: Any) -> list[str]:
-    return [str(sheet.cell(1, col).value) for col in range(1, sheet.max_column + 1) if sheet.cell(1, col).value not in (None, "")]
+    return list(_header_index(sheet).keys())
 
 
 def _header_index(sheet: Any) -> dict[str, int]:
-    return {header: idx + 1 for idx, header in enumerate(_headers(sheet))}
+    index: dict[str, int] = {}
+    for col in range(1, sheet.max_column + 1):
+        value = sheet.cell(1, col).value
+        if value not in (None, ""):
+            index[str(value)] = col
+    return index
 
 
 def _ensure_sheet(workbook: Workbook, sheet_name: str, fields: list[str]) -> Any:
@@ -30,44 +35,58 @@ def _ensure_sheet(workbook: Workbook, sheet_name: str, fields: list[str]) -> Any
         sheet = workbook[sheet_name]
     else:
         sheet = workbook.create_sheet(sheet_name)
-    existing = _headers(sheet)
-    if not existing:
-        existing = fields
-        for col, field in enumerate(existing, start=1):
+
+    index = _header_index(sheet)
+    if not index:
+        for col, field in enumerate(fields, start=1):
             sheet.cell(1, col).value = field
+            index[field] = col
     else:
+        next_col = max(index.values(), default=0) + 1
         for field in fields:
-            if field not in existing:
-                existing.append(field)
-                sheet.cell(1, len(existing)).value = field
+            if field not in index:
+                sheet.cell(1, next_col).value = field
+                index[field] = next_col
+                next_col += 1
     return sheet
 
 
-def _row_dict(sheet: Any, row_idx: int) -> dict[str, Any]:
-    index = _header_index(sheet)
-    return {field: sheet.cell(row_idx, col).value for field, col in index.items()}
+def _row_dict(sheet: Any, row_idx: int, index: dict[str, int] | None = None, fields: list[str] | None = None) -> dict[str, Any]:
+    current_index = index or _header_index(sheet)
+    selected_fields = fields or list(current_index.keys())
+    return {
+        field: sheet.cell(row_idx, current_index[field]).value if field in current_index else None
+        for field in selected_fields
+    }
 
 
 def _row_matches(row: dict[str, Any], match: dict[str, Any]) -> bool:
     return all(str(row.get(field)) == str(value) for field, value in match.items())
 
 
-def _find_rows(sheet: Any, match: dict[str, Any]) -> list[int]:
+def _find_rows(sheet: Any, match: dict[str, Any], index: dict[str, int] | None = None) -> list[int]:
+    current_index = index or _header_index(sheet)
+    if any(field not in current_index for field in match):
+        return []
     rows: list[int] = []
+    match_fields = list(match.keys())
     for row_idx in range(2, sheet.max_row + 1):
-        if _row_matches(_row_dict(sheet, row_idx), match):
+        row = _row_dict(sheet, row_idx, current_index, match_fields)
+        if _row_matches(row, match):
             rows.append(row_idx)
     return rows
 
 
-def _write_row(sheet: Any, row_idx: int, row: dict[str, Any]) -> None:
-    index = _header_index(sheet)
+def _write_row(sheet: Any, row_idx: int, row: dict[str, Any], index: dict[str, int] | None = None) -> dict[str, int]:
+    current_index = index if index is not None else _header_index(sheet)
+    next_col = max(current_index.values(), default=0) + 1
     for field, value in row.items():
-        if field not in index:
-            next_col = sheet.max_column + 1
+        if field not in current_index:
             sheet.cell(1, next_col).value = field
-            index[field] = next_col
-        sheet.cell(row_idx, index[field]).value = value
+            current_index[field] = next_col
+            next_col += 1
+        sheet.cell(row_idx, current_index[field]).value = value
+    return current_index
 
 
 def _table_ref(manifest: Manifest, schema: SchemaBundle, table_name: str, base_dir: Path) -> tuple[Path, str]:
@@ -100,51 +119,61 @@ def _open_states(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_di
     return states
 
 
-def _snapshot(workbook: Workbook) -> dict[str, list[dict[str, Any]]]:
-    data: dict[str, list[dict[str, Any]]] = {}
-    for sheet in workbook.worksheets:
-        rows = []
-        for row_idx in range(2, sheet.max_row + 1):
-            row = _row_dict(sheet, row_idx)
-            if any(value not in (None, "") for value in row.values()):
-                rows.append(row)
-        data[sheet.title] = rows
-    return data
-
-
 def _normalize_key(row: dict[str, Any], primary_key: list[str]) -> tuple[Any, ...]:
     return tuple(row.get(field) for field in primary_key)
 
 
-def _diff_table(old_rows: list[dict[str, Any]], new_rows: list[dict[str, Any]], primary_key: list[str]) -> dict[str, Any]:
+def _row_key(row: dict[str, Any], primary_key: list[str], fallback: int) -> list[Any]:
     if not primary_key:
-        return {"old_count": len(old_rows), "new_count": len(new_rows)}
-    old_map = {_normalize_key(row, primary_key): row for row in old_rows}
-    new_map = {_normalize_key(row, primary_key): row for row in new_rows}
-    inserted = [new_map[key] for key in new_map.keys() - old_map.keys()]
-    deleted = [old_map[key] for key in old_map.keys() - new_map.keys()]
-    changed = []
-    for key in old_map.keys() & new_map.keys():
-        if old_map[key] != new_map[key]:
-            changed.append({"key": list(key), "before": old_map[key], "after": new_map[key]})
-    return {"inserted": inserted, "deleted": deleted, "changed": changed}
+        return [fallback]
+    return list(_normalize_key(row, primary_key))
 
 
-def _validate_workbook(workbook: Workbook, schema: SchemaBundle) -> ValidationReport:
+def _table_diff(diffs: dict[str, Any], file_key: str, sheet_name: str) -> dict[str, list[Any]]:
+    file_diff = diffs.setdefault(file_key, {})
+    return file_diff.setdefault(sheet_name, {"inserted": [], "deleted": [], "changed": []})
+
+
+def _track_table(tables_by_file: dict[str, set[str]], file_key: str, table_name: str) -> None:
+    tables_by_file.setdefault(file_key, set()).add(table_name)
+
+
+def _track_row(rows_by_file: dict[str, dict[str, set[int]]], file_key: str, table_name: str, row_idx: int | None = None) -> None:
+    table_rows = rows_by_file.setdefault(file_key, {}).setdefault(table_name, set())
+    if row_idx is not None:
+        table_rows.add(row_idx)
+
+
+def _validate_workbook(
+    workbook: Workbook,
+    schema: SchemaBundle,
+    table_names: set[str] | None = None,
+    touched_rows: dict[str, set[int]] | None = None,
+) -> ValidationReport:
     report = ValidationReport()
-    for table_name, table in schema.tables.items():
+    selected_tables = table_names if table_names is not None else set(schema.tables.keys())
+    for table_name in selected_tables:
+        table = schema.tables.get(table_name)
+        if not table:
+            continue
         sheet_name = table.sheet or table_name
         if sheet_name not in workbook.sheetnames:
             continue
         sheet = workbook[sheet_name]
-        headers = _headers(sheet)
         index = _header_index(sheet)
+        headers = set(index.keys())
         for field, spec in table.fields.items():
             if spec.required and field not in headers:
                 report.errors.append(ValidationIssue(level="error", table=table_name, field=field, message="required field missing from sheet"))
-        seen: set[tuple[Any, ...]] = set()
-        for row_idx in range(2, sheet.max_row + 1):
-            row = _row_dict(sheet, row_idx)
+
+        if touched_rows is not None and table_name in touched_rows:
+            rows_to_check = sorted(row_idx for row_idx in touched_rows[table_name] if row_idx <= sheet.max_row)
+        else:
+            rows_to_check = list(range(2, sheet.max_row + 1))
+
+        field_names = list(table.fields.keys())
+        for row_idx in rows_to_check:
+            row = _row_dict(sheet, row_idx, index, field_names)
             if not any(value not in (None, "") for value in row.values()):
                 continue
             for field, spec in table.fields.items():
@@ -156,11 +185,22 @@ def _validate_workbook(workbook: Workbook, schema: SchemaBundle) -> ValidationRe
                         int(value)
                     except (TypeError, ValueError):
                         report.errors.append(ValidationIssue(level="error", table=table_name, row=row_idx, field=field, message="expected int"))
-            if table.primary_key and all(field in index for field in table.primary_key):
-                key = tuple(row.get(field) for field in table.primary_key)
+
+        touched_for_table = touched_rows.get(table_name, set()) if touched_rows is not None else None
+        if table.primary_key and all(field in index for field in table.primary_key) and (touched_for_table is None or touched_for_table):
+            seen: dict[tuple[Any, ...], int] = {}
+            touched_keys: set[tuple[Any, ...]] = set()
+            for row_idx in range(2, sheet.max_row + 1):
+                key = tuple(sheet.cell(row_idx, index[field]).value for field in table.primary_key)
+                if not any(value not in (None, "") for value in key):
+                    continue
+                if touched_for_table is not None and row_idx in touched_for_table:
+                    touched_keys.add(key)
                 if key in seen:
-                    report.errors.append(ValidationIssue(level="error", table=table_name, row=row_idx, message=f"duplicate primary key {key}"))
-                seen.add(key)
+                    if touched_for_table is None or row_idx in touched_for_table or key in touched_keys:
+                        report.errors.append(ValidationIssue(level="error", table=table_name, row=row_idx, message=f"duplicate primary key {key}"))
+                else:
+                    seen[key] = row_idx
     return report
 
 
@@ -168,26 +208,44 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
     if write_mode not in {"preview", "overwrite"}:
         raise ValueError("write_mode must be preview or overwrite")
     states = _open_states(manifest, schema, patch, base_dir, run_dir)
-    before: dict[str, dict[str, list[dict[str, Any]]]] = {key: _snapshot(state.workbook) for key, state in states.items()}
     rollback_ops: list[PatchOperation] = []
     operation_results: list[dict[str, Any]] = []
+    touched_tables_by_file: dict[str, set[str]] = {}
+    touched_rows_by_file: dict[str, dict[str, set[int]]] = {}
+    diffs: dict[str, Any] = {}
 
     for operation in patch.operations:
         table = schema.tables[operation.target_table]
         source_path, sheet_name = _table_ref(manifest, schema, operation.target_table, base_dir)
-        state = states[str(source_path)]
+        file_key = str(source_path)
+        state = states[file_key]
         sheet = _ensure_sheet(state.workbook, sheet_name, list(table.fields.keys()))
+        index = _header_index(sheet)
+        table_diff = _table_diff(diffs, file_key, sheet_name)
+        _track_table(touched_tables_by_file, file_key, operation.target_table)
+        _track_row(touched_rows_by_file, file_key, operation.target_table)
 
         if operation.op == "update":
-            rows = _find_rows(sheet, operation.match)
-            old_rows = [_row_dict(sheet, row_idx) for row_idx in rows]
-            for row_idx in rows:
-                allowed = {
-                    field: value
-                    for field, value in operation.set.items()
-                    if field not in table.block_update_fields and (not table.allow_update_fields or field in table.allow_update_fields)
-                }
-                _write_row(sheet, row_idx, allowed)
+            rows = _find_rows(sheet, operation.match, index)
+            old_rows = [_row_dict(sheet, row_idx, index) for row_idx in rows]
+            allowed = {
+                field: value
+                for field, value in operation.set.items()
+                if field not in table.block_update_fields and (not table.allow_update_fields or field in table.allow_update_fields)
+            }
+            for row_idx, before in zip(rows, old_rows):
+                _write_row(sheet, row_idx, allowed, index)
+                after = _row_dict(sheet, row_idx, index)
+                if before != after:
+                    table_diff["changed"].append(
+                        {
+                            "row": row_idx,
+                            "key": _row_key(after, table.primary_key, row_idx),
+                            "before": before,
+                            "after": after,
+                        }
+                    )
+                _track_row(touched_rows_by_file, file_key, operation.target_table, row_idx)
             for old in old_rows:
                 rollback_ops.append(
                     PatchOperation(
@@ -206,7 +264,11 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
 
         elif operation.op == "insert":
             for row in operation.rows:
-                _write_row(sheet, sheet.max_row + 1, row)
+                row_idx = sheet.max_row + 1
+                _write_row(sheet, row_idx, row, index)
+                inserted = _row_dict(sheet, row_idx, index)
+                table_diff["inserted"].append(inserted)
+                _track_row(touched_rows_by_file, file_key, operation.target_table, row_idx)
                 match = {field: row.get(field) for field in table.primary_key if field in row}
                 if match:
                     rollback_ops.append(
@@ -224,8 +286,9 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
             operation_results.append({"op": operation.op, "target_table": operation.target_table, "affected_rows": len(operation.rows)})
 
         elif operation.op == "delete_where":
-            rows = _find_rows(sheet, operation.match)
-            old_rows = [_row_dict(sheet, row_idx) for row_idx in rows]
+            rows = _find_rows(sheet, operation.match, index)
+            old_rows = [_row_dict(sheet, row_idx, index) for row_idx in rows]
+            table_diff["deleted"].extend(old_rows)
             for row_idx in sorted(rows, reverse=True):
                 sheet.delete_rows(row_idx, 1)
             if old_rows:
@@ -244,12 +307,17 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
             operation_results.append({"op": operation.op, "target_table": operation.target_table, "affected_rows": len(rows)})
 
         elif operation.op == "replace_group":
-            rows = _find_rows(sheet, operation.match)
-            old_rows = [_row_dict(sheet, row_idx) for row_idx in rows]
+            rows = _find_rows(sheet, operation.match, index)
+            old_rows = [_row_dict(sheet, row_idx, index) for row_idx in rows]
+            table_diff["deleted"].extend(old_rows)
             for row_idx in sorted(rows, reverse=True):
                 sheet.delete_rows(row_idx, 1)
             for row in operation.rows:
-                _write_row(sheet, sheet.max_row + 1, row)
+                row_idx = sheet.max_row + 1
+                _write_row(sheet, row_idx, row, index)
+                inserted = _row_dict(sheet, row_idx, index)
+                table_diff["inserted"].append(inserted)
+                _track_row(touched_rows_by_file, file_key, operation.target_table, row_idx)
             rollback_ops.append(
                 PatchOperation(
                     op="replace_group",
@@ -269,7 +337,6 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
     backups: dict[str, str] = {}
     written_files: dict[str, str] = {}
     validation_reports: dict[str, Any] = {}
-    diffs: dict[str, Any] = {}
     for key, state in states.items():
         if state.source_path.exists():
             backup = run_dir / "backups" / state.source_path.name
@@ -282,15 +349,14 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
             state.source_path.parent.mkdir(parents=True, exist_ok=True)
             state.workbook.save(state.source_path)
             written_files[key] = str(state.source_path)
-        report = _validate_workbook(state.workbook, schema)
+        report = _validate_workbook(
+            state.workbook,
+            schema,
+            touched_tables_by_file.get(key, set()),
+            touched_rows_by_file.get(key, {}),
+        )
         validation_reports[key] = report.model_dump()
-        after = _snapshot(state.workbook)
-        file_diff: dict[str, Any] = {}
-        for table_name, table in schema.tables.items():
-            sheet_name = table.sheet or table_name
-            if sheet_name in before[key] or sheet_name in after:
-                file_diff[sheet_name] = _diff_table(before[key].get(sheet_name, []), after.get(sheet_name, []), table.primary_key)
-        diffs[key] = file_diff
+        diffs.setdefault(key, {})
 
     rollback = Patch(
         patch_id=f"rollback_{patch.patch_id}",
