@@ -147,14 +147,17 @@ button:hover {
 }
 
 .mode-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfcfd;
+}
+
+.mode-copy {
+  min-width: 0;
 }
 
 .mode-title {
@@ -175,8 +178,8 @@ button:hover {
 }
 
 .segmented {
-  display: inline-flex;
-  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(78px, 1fr));
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #ffffff;
@@ -184,23 +187,24 @@ button:hover {
 }
 
 .mode-controls {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(116px, 0.85fr) minmax(164px, 1.15fr);
   gap: 8px;
+  min-width: 0;
 }
 
 .mode-controls select {
-  width: auto;
-  min-width: 140px;
+  width: 100%;
+  min-width: 0;
 }
 
 .segment {
-  min-width: 82px;
+  min-width: 0;
   border: 0;
   border-radius: 0;
   padding: 7px 10px;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .segment + .segment {
@@ -284,8 +288,7 @@ pre {
   }
 
   .mode-row {
-    align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .segmented {
@@ -293,8 +296,7 @@ pre {
   }
 
   .mode-controls {
-    align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .mode-controls select {
