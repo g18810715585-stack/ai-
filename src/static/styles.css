@@ -484,6 +484,62 @@ button:disabled {
   color: var(--accent-2);
 }
 
+.danger-button {
+  border-color: #d47d6f;
+  color: #9f3428;
+}
+
+.danger-button:hover {
+  border-color: #b4483b;
+}
+
+.record-layout {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+  gap: 12px;
+}
+
+.case-review-box {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.case-review-box textarea {
+  min-height: 110px;
+  max-height: 210px;
+  font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+  font-size: 13px;
+}
+
+.record-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.record-actions button.running {
+  position: relative;
+  padding-left: 30px;
+  color: var(--accent-2);
+}
+
+.record-actions button.running::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -730,7 +786,8 @@ pre {
   .target-picker button,
   .dialog-tools button,
   .common-actions button,
-  .history-actions button {
+  .history-actions button,
+  .record-actions button {
     width: 100%;
   }
 
@@ -741,6 +798,7 @@ pre {
   .dialog-tools,
   .common-actions,
   .history-actions,
+  .record-actions,
   .dialog-footer,
   .dialog-footer-actions {
     align-items: stretch;

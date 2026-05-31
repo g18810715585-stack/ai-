@@ -89,6 +89,7 @@
           <button id="analyzeBtn" type="button">分析表格</button>
           <button id="draftBtn" type="button">生成草案</button>
           <button id="applyBtn" type="button">生成预览</button>
+          <button id="overwriteBtn" class="danger-button" type="button">覆盖原表</button>
           <button id="learnBtn" type="button">记录习惯</button>
         </div>
       </section>
@@ -100,6 +101,7 @@
           <button class="tab" data-tab="confirmations">待确认字段</button>
           <button class="tab" data-tab="diagnostics">草案诊断</button>
           <button class="tab" data-tab="relations">关联关系</button>
+          <button class="tab" data-tab="record">配表记录</button>
           <button class="tab" data-tab="result">执行结果</button>
           <button class="tab" data-tab="raw">原始响应</button>
         </div>
@@ -118,6 +120,20 @@
         </div>
         <div id="relationsTab" class="tab-content">
           <pre id="relationsText"></pre>
+        </div>
+        <div id="recordTab" class="tab-content">
+          <div class="record-layout">
+            <pre id="recordText"></pre>
+            <section class="case-review-box">
+              <label>
+                本次问题修正
+                <textarea id="caseCorrectionText" spellcheck="false" placeholder="你本地检查表后，把这次配表所有问题写在这里。比如：哪些字段填错、哪些表漏配、为什么不符合你的习惯。"></textarea>
+              </label>
+              <div class="record-actions">
+                <button id="saveCaseReviewBtn" type="button" disabled>确认并总结为案例</button>
+              </div>
+            </section>
+          </div>
         </div>
         <div id="resultTab" class="tab-content">
           <pre id="resultText"></pre>

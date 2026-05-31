@@ -57,7 +57,8 @@ Usage:
   node src/cli.mjs relations --manifest fixtures/sample.manifest.json
   node src/cli.mjs analyze --manifest fixtures/sample.manifest.json
   node src/cli.mjs draft --manifest fixtures/sample.manifest.json [--stub]
-  node src/cli.mjs apply --manifest fixtures/sample.manifest.json --patch .runs/latest/patch.json
+  node src/cli.mjs apply --manifest fixtures/sample.manifest.json --patch .runs/latest/patch.json [--write-mode preview|overwrite]
+  node src/cli.mjs case-review --manifest fixtures/sample.manifest.json --patch .runs/latest/patch.json --apply-result .runs/latest/apply-result.json --correction "这次的问题"
   node src/cli.mjs learn --manifest fixtures/sample.manifest.json --patch .runs/latest/patch.json --decision accepted
 `);
 }
@@ -74,7 +75,7 @@ async function main() {
     await startServer({ port, projectRoot, openBrowser: rest.includes("--open") });
     return 0;
   }
-  if (["analyze", "schema-scan", "teach", "experience-summary", "experience-list", "experience-update", "experience-delete", "plan", "relations", "draft", "apply", "learn"].includes(command)) {
+  if (["analyze", "schema-scan", "teach", "experience-summary", "experience-list", "experience-update", "experience-delete", "plan", "relations", "draft", "apply", "case-review", "learn"].includes(command)) {
     return runPython([command, ...rest]);
   }
   console.error(`Unknown command: ${command}`);

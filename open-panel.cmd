@@ -36,18 +36,18 @@ exit /b 0
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop';" ^
   "$base='%PANEL_URL%';" ^
-  "$health=Invoke-RestMethod -Uri ($base + '/api/health') -TimeoutSec 2;" ^
-  "$tables=Invoke-RestMethod -Uri ($base + '/api/table-options') -TimeoutSec 2;" ^
-  "$html=(Invoke-WebRequest -UseBasicParsing -Uri $base -TimeoutSec 2).Content;" ^
-  "$app=(Invoke-WebRequest -UseBasicParsing -Uri ($base + '/app.js') -TimeoutSec 2).Content;" ^
+  "$health=Invoke-RestMethod -Uri ($base + '/api/health') -TimeoutSec 10;" ^
+  "$tables=Invoke-RestMethod -Uri ($base + '/api/table-options') -TimeoutSec 10;" ^
+  "$html=(Invoke-WebRequest -UseBasicParsing -Uri $base -TimeoutSec 10).Content;" ^
+  "$app=(Invoke-WebRequest -UseBasicParsing -Uri ($base + '/app.js') -TimeoutSec 10).Content;" ^
   "$invalidCount = @($tables.tables | Where-Object { $_.name -notmatch '^[A-Za-z][A-Za-z0-9_]*$' }).Count;" ^
   "$firstCommon = @($tables.tables | Where-Object { $_.is_common } | Select-Object -First 1)[0];" ^
   "if (-not $health.ok) { throw 'health failed' }" ^
   "if (($tables.table_count -as [int]) -lt 1) { throw 'table-options missing' }" ^
   "if ($invalidCount -gt 0) { throw 'table-options has invalid names' }" ^
   "if (-not $firstCommon -or $firstCommon.frequency_tier -ne 'core') { throw 'table-options tier order failed' }" ^
-  "if (-not ($html.Contains('targetDialog') -and $html.Contains('experienceDialog') -and $html.Contains('itemBaseFeishuUrl') -and $html.Contains('relationsBtn') -and $html.Contains('relationsTab') -and $html.Contains('diagnosticsTab') -and $html.Contains('teachBtn') -and $html.Contains('saveExperienceBtn') -and $html.Contains('openExperienceDialog') -and $html.Contains('experienceSummaryText') -and $html.Contains('activityPlanBtn') -and $html.Contains('planTab') -and $html.Contains('confirmationsTab') -and $html.Contains('internal-manifest') -and ($html.IndexOf('manifest-field') -lt 0))) { throw 'panel html is stale' }" ^
-  "if (-not ($app.Contains('serverCommonTables') -and $app.Contains('tablePresetVersion') -and $app.Contains('tableTierLabels') -and $app.Contains('compactRelationshipMap') -and $app.Contains('compactItemResolution') -and $app.Contains('compactDraftDiagnostics') -and $app.Contains('compactConfigPlan') -and $app.Contains('compactExperienceSummary') -and $app.Contains('loadSavedExperiences') -and $app.Contains('setActionBusy'))) { throw 'app.js is stale' }" ^
+  "if (-not ($html.Contains('targetDialog') -and $html.Contains('experienceDialog') -and $html.Contains('itemBaseFeishuUrl') -and $html.Contains('relationsBtn') -and $html.Contains('relationsTab') -and $html.Contains('diagnosticsTab') -and $html.Contains('recordTab') -and $html.Contains('recordText') -and $html.Contains('overwriteBtn') -and $html.Contains('caseCorrectionText') -and $html.Contains('saveCaseReviewBtn') -and $html.Contains('teachBtn') -and $html.Contains('saveExperienceBtn') -and $html.Contains('openExperienceDialog') -and $html.Contains('experienceSummaryText') -and $html.Contains('activityPlanBtn') -and $html.Contains('planTab') -and $html.Contains('confirmationsTab') -and $html.Contains('internal-manifest') -and ($html.IndexOf('manifest-field') -lt 0))) { throw 'panel html is stale' }" ^
+  "if (-not ($app.Contains('serverCommonTables') -and $app.Contains('tablePresetVersion') -and $app.Contains('tableTierLabels') -and $app.Contains('compactRelationshipMap') -and $app.Contains('compactItemResolution') -and $app.Contains('compactDraftDiagnostics') -and $app.Contains('compactConfigPlan') -and $app.Contains('compactExperienceSummary') -and $app.Contains('compactConfigurationRecord') -and $app.Contains('applyCurrentPatch') -and $app.Contains('loadSavedExperiences') -and $app.Contains('setActionBusy'))) { throw 'app.js is stale' }" ^
   "exit 0"
 exit /b %errorlevel%
 

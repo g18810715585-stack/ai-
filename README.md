@@ -140,6 +140,22 @@ node src/cli.mjs plan --manifest fixtures/sample.manifest.json
 
 知识库文件分开保存在 `.knowledge/rules.jsonl`、`.knowledge/activity_templates.jsonl`、`.knowledge/field_mappings.jsonl` 和 `.knowledge/case_examples.jsonl`。审核草案后运行 `learn` 会同时记录习惯和案例证据，后续相似活动会优先复用。
 
+## 覆盖写表和案例复盘
+
+面板里现在有两种执行方式：
+
+1. `生成预览`：只生成预览 Excel、diff、校验报告、rollback patch 和本次配表记录，不覆盖原表。
+2. `覆盖原表`：确认后先备份原 Excel，再把 patch 写回原表，同时保留预览、diff、校验报告、rollback patch 和配表记录。
+
+每次执行后会进入 `配表记录` 页签，里面会列出这次改了哪些表、每个操作为什么这么改、置信度、风险、备份文件和写回文件。你本地打开 Excel 检查后，把这次所有问题写进 `本次问题修正`，点击 `确认并总结为案例`。工具会把这次配表流程、你的修正和 AI/本地总结保存到 `.knowledge/case_examples.jsonl`，下次生成配表计划和草案时会优先参考这些修正案例。
+
+CLI 对应命令：
+
+```powershell
+node src/cli.mjs apply --manifest fixtures/sample.manifest.json --patch .runs/latest/patch.json --write-mode overwrite
+node src/cli.mjs case-review --manifest fixtures/sample.manifest.json --patch .runs/latest/patch.json --apply-result .runs/latest/apply-result.json --correction "这次的问题和修改原因"
+```
+
 ## CLI
 
 ```text

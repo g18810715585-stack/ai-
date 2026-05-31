@@ -32,8 +32,13 @@ function resolvePython() {
 }
 
 function sendJson(res, status, payload) {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(payload, null, 2));
+  if (res.destroyed || res.writableEnded) return;
+  try {
+    res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify(payload, null, 2));
+  } catch {
+    // The browser or health check may have already timed out; keep the panel process alive.
+  }
 }
 
 function readBody(req) {
@@ -388,6 +393,8 @@ function collectArtifact(result) {
   if (parsed.config_plan) artifact.configPlan = maybeReadJson(parsed.config_plan);
   if (parsed.draft_diagnostics) artifact.draftDiagnostics = maybeReadJson(parsed.draft_diagnostics);
   if (parsed.result) artifact.result = maybeReadJson(parsed.result);
+  if (parsed.configuration_record) artifact.configurationRecord = maybeReadJson(parsed.configuration_record);
+  if (parsed.case_review) artifact.caseReview = maybeReadJson(parsed.case_review);
   if (parsed.relationship_map) artifact.relationshipMap = maybeReadJson(parsed.relationship_map);
   if (parsed.planning_item_resolution) artifact.planningItemResolution = maybeReadJson(parsed.planning_item_resolution);
   if (parsed.schema_draft) artifact.schemaDraft = summarizeSchemaDraft(parsed.schema_draft);
@@ -398,6 +405,8 @@ function collectArtifact(result) {
     artifact.planningItemResolution = artifact.planningItemResolution || maybeReadJson(path.join(parsed.run_dir, "planning-item-resolution.json"));
     artifact.configPlan = artifact.configPlan || maybeReadJson(path.join(parsed.run_dir, "config-plan.json"));
     artifact.draftDiagnostics = artifact.draftDiagnostics || maybeReadJson(path.join(parsed.run_dir, "draft-diagnostics.json"));
+    artifact.configurationRecord = artifact.configurationRecord || maybeReadJson(path.join(parsed.run_dir, "configuration-record.json"));
+    artifact.caseReview = artifact.caseReview || maybeReadJson(path.join(parsed.run_dir, "case-review.json"));
     artifact.diff = maybeReadJson(path.join(parsed.run_dir, "diff.json"));
     artifact.validation = maybeReadJson(path.join(parsed.run_dir, "validation.json"));
     artifact.rollback = maybeReadJson(path.join(parsed.run_dir, "rollback-patch.json"));
@@ -465,7 +474,25 @@ async function handleApi(req, res, projectRoot) {
   } else if (url.pathname === "/api/apply") {
     const patchPath = path.join(uploadRoot, "patch.json");
     fs.writeFileSync(patchPath, JSON.stringify(payload.patch || {}, null, 2), "utf8");
-    args = ["apply", "--manifest", manifestPath, "--patch", patchPath];
+    const writeMode = payload.write_mode === "overwrite" ? "overwrite" : "preview";
+    args = ["apply", "--manifest", manifestPath, "--patch", patchPath, "--write-mode", writeMode];
+  } else if (url.pathname === "/api/case-review") {
+    const patchPath = path.join(uploadRoot, "patch.json");
+    const applyResultPath = path.join(uploadRoot, "apply-result.json");
+    fs.writeFileSync(patchPath, JSON.stringify(payload.patch || {}, null, 2), "utf8");
+    fs.writeFileSync(applyResultPath, JSON.stringify(payload.apply_result || {}, null, 2), "utf8");
+    args = [
+      "case-review",
+      "--manifest",
+      manifestPath,
+      "--patch",
+      patchPath,
+      "--apply-result",
+      applyResultPath,
+      "--correction",
+      payload.correction_text || ""
+    ];
+    if (payload.no_ai) args.push("--no-ai");
   } else if (url.pathname === "/api/learn") {
     const patchPath = path.join(uploadRoot, "patch.json");
     fs.writeFileSync(patchPath, JSON.stringify(payload.patch || {}, null, 2), "utf8");
@@ -513,6 +540,9 @@ function writePidFile(projectRoot, port) {
 export async function startServer({ port = 4321, projectRoot, openBrowser = false }) {
   loadDotEnv(projectRoot);
   const server = http.createServer((req, res) => {
+    res.on("error", () => {
+      // Best-effort response only; aborted local checks should not crash the panel.
+    });
     if (req.url.startsWith("/api/")) {
       handleApi(req, res, projectRoot).catch((error) => sendJson(res, 500, { error: error.message }));
       return;

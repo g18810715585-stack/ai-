@@ -725,9 +725,23 @@ def _match_cases(cases: list[dict[str, Any]], project: str, signals: dict[str, A
         overlap = len(set(case.get("target_tables", [])) & target_tables)
         if overlap:
             score += min(0.18, overlap * 0.05)
-        note = _norm(case.get("note", ""))
+        review = case.get("case_review") or {}
+        review_bits = []
+        for key in ("summary", "mistakes", "lessons", "avoid_next_time"):
+            value = review.get(key)
+            if isinstance(value, list):
+                review_bits.extend(str(item) for item in value)
+            elif value:
+                review_bits.append(str(value))
+        note = _norm(" ".join([str(case.get("note", "")), str(case.get("correction", "")), *review_bits]))
         if note and note in text:
             score += 0.1
+        elif note:
+            text_hits = sum(1 for chunk in review_bits if _norm(chunk) and _norm(chunk) in text)
+            if text_hits:
+                score += min(0.18, text_hits * 0.06)
+        if case.get("decision") == "corrected":
+            score += 0.08
         if score >= 0.55 and (overlap or case.get("project") == project):
             item = dict(case)
             item["match_score"] = round(min(score, 0.98), 3)

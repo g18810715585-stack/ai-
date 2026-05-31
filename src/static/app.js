@@ -5,6 +5,7 @@ const relationsText = document.querySelector("#relationsText");
 const planText = document.querySelector("#planText");
 const confirmationsText = document.querySelector("#confirmationsText");
 const resultText = document.querySelector("#resultText");
+const recordText = document.querySelector("#recordText");
 const rawText = document.querySelector("#rawText");
 const statusEl = document.querySelector("#status");
 const configDirInput = document.querySelector("#configDir");
@@ -27,6 +28,8 @@ const experienceEditText = document.querySelector("#experienceEditText");
 const experienceMeta = document.querySelector("#experienceMeta");
 const updateExperienceBtn = document.querySelector("#updateExperienceBtn");
 const deleteExperienceBtn = document.querySelector("#deleteExperienceBtn");
+const caseCorrectionText = document.querySelector("#caseCorrectionText");
+const saveCaseReviewBtn = document.querySelector("#saveCaseReviewBtn");
 const tablePresetVersion = "meta-doc-excel-local-learning-v2";
 const tableTierRanks = { core: 0, high: 1, medium: 2, low: 3 };
 const tableTierLabels = { core: "核心", high: "高频", medium: "中频", low: "低频" };
@@ -121,6 +124,8 @@ let pendingTargetSelection = new Set();
 let latestExperienceSummary = null;
 let savedExperiences = [];
 let selectedExperienceId = "";
+let lastApplyResult = null;
+let lastConfigurationRecord = null;
 
 const rememberedFields = [
   ["configDir", configDirInput],
@@ -172,7 +177,7 @@ function setStatus(text, state = "") {
 // Only the clicked workflow button stays enabled while a long backend action runs.
 function setActionBusy(button, label, busy) {
   if (!button) return;
-  const actionButtons = Array.from(document.querySelectorAll(".actions button, .experience-actions button, .history-actions button"));
+  const actionButtons = Array.from(document.querySelectorAll(".actions button, .experience-actions button, .history-actions button, .record-actions button"));
   if (busy) {
     button.dataset.originalText = button.dataset.originalText || button.textContent;
     button.textContent = `正在${label}...`;
@@ -737,6 +742,46 @@ function compactSchemaResult(data) {
   };
 }
 
+function compactConfigurationRecord(data) {
+  const artifact = data.artifact || {};
+  const result = artifact.result || parseStdout(data);
+  const record = artifact.configurationRecord || result.configuration_record || null;
+  return {
+    summary: {
+      write_mode: result.write_mode || record?.write_mode || "preview",
+      operation_count: record?.operation_count || result.operation_results?.length || 0,
+      target_tables: record?.target_tables || [],
+      validation_summary: record?.validation_summary || null,
+      previews: result.previews || record?.previews || {},
+      backups: result.backups || record?.backups || {},
+      written_files: result.written_files || record?.written_files || {}
+    },
+    tables: (record?.tables || []).map((table) => ({
+      table: table.table,
+      operation_count: table.operation_count,
+      affected_rows: table.affected_rows,
+      operations: (table.operations || []).map((operation) => ({
+        op: operation.op,
+        affected_rows: operation.affected_rows,
+        reason: operation.reason,
+        confidence: operation.confidence,
+        risk_level: operation.risk_level,
+        set: operation.set,
+        rows: operation.rows
+      }))
+    })),
+    record
+  };
+}
+
+function renderConfigurationRecord(data) {
+  const artifact = data.artifact || {};
+  lastApplyResult = artifact.result || parseStdout(data);
+  lastConfigurationRecord = artifact.configurationRecord || lastApplyResult.configuration_record || null;
+  recordText.textContent = JSON.stringify(compactConfigurationRecord(data), null, 2);
+  saveCaseReviewBtn.disabled = !lastConfigurationRecord || !caseCorrectionText.value.trim();
+}
+
 function compactRelationshipMap(data) {
   const map = data.artifact?.relationshipMap || data.relationship_map || {};
   const relations = (map.relations || []).slice(0, 80).map((relation) => ({
@@ -1017,6 +1062,7 @@ async function runAction(event, action) {
     const hasSelectedExperience = Boolean(selectedExperienceId);
     updateExperienceBtn.disabled = !hasSelectedExperience || !experienceEditText.value.trim();
     deleteExperienceBtn.disabled = !hasSelectedExperience;
+    saveCaseReviewBtn.disabled = !lastConfigurationRecord || !caseCorrectionText.value.trim();
   }
 }
 
@@ -1027,6 +1073,10 @@ for (const [, input] of rememberedFields) {
 
 experienceSummaryText.addEventListener("input", () => {
   saveExperienceBtn.disabled = !experienceSummaryText.value.trim();
+});
+
+caseCorrectionText.addEventListener("input", () => {
+  saveCaseReviewBtn.disabled = !lastConfigurationRecord || !caseCorrectionText.value.trim();
 });
 
 document.querySelector("#loadSample").addEventListener("click", () => {
@@ -1223,12 +1273,50 @@ document.querySelector("#draftBtn").addEventListener("click", (event) => runActi
   }
 }));
 
-document.querySelector("#applyBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+async function applyCurrentPatch(writeMode, label) {
   const payload = await buildPayload();
   payload.patch = JSON.parse(patchText.value || JSON.stringify(lastPatch || {}));
+  payload.write_mode = writeMode;
   const data = await callApi("/api/apply", payload, { label });
+  renderConfigurationRecord(data);
   resultText.textContent = JSON.stringify(data.artifact || parseStdout(data), null, 2);
-  showTab("result");
+  showTab("record");
+}
+
+document.querySelector("#applyBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+  await applyCurrentPatch("preview", label);
+}));
+
+document.querySelector("#overwriteBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+  const confirmed = window.confirm("确认覆盖原表吗？工具会先生成备份、预览、diff、校验报告和回滚 patch，再写回原 Excel。");
+  if (!confirmed) return;
+  await applyCurrentPatch("overwrite", label);
+}));
+
+saveCaseReviewBtn.addEventListener("click", (event) => runAction(event, async (label) => {
+  if (!lastApplyResult || !lastConfigurationRecord) {
+    throw new Error("请先生成预览或覆盖原表，拿到本次配表记录后再复盘。");
+  }
+  const correction = caseCorrectionText.value.trim();
+  if (!correction) throw new Error("请先填写这次配表的问题。");
+  const payload = await buildPayload();
+  payload.patch = JSON.parse(patchText.value || JSON.stringify(lastPatch || {}));
+  payload.apply_result = lastApplyResult;
+  payload.correction_text = correction;
+  payload.no_ai = draftMode !== "real";
+  const data = await callApi("/api/case-review", payload, { label });
+  const caseReview = data.artifact?.caseReview || parseStdout(data);
+  recordText.textContent = JSON.stringify(
+    {
+      configuration_record: lastConfigurationRecord,
+      case_review: caseReview
+    },
+    null,
+    2
+  );
+  resultText.textContent = JSON.stringify(caseReview, null, 2);
+  setStatus("案例复盘已保存，后续相似配表会优先参考这次修正", "ok");
+  showTab("record");
 }));
 
 document.querySelector("#learnBtn").addEventListener("click", (event) => runAction(event, async (label) => {
@@ -1248,6 +1336,7 @@ for (const button of document.querySelectorAll(".tab")) {
 manifestText.value = JSON.stringify(sampleManifest, null, 2);
 restoreRememberedInputs();
 saveExperienceBtn.disabled = !experienceSummaryText.value.trim();
+saveCaseReviewBtn.disabled = true;
 const storedCommonTables = readJsonStorage("commonTables", []);
 commonTablesInput.value = storedCommonTables.join("\n");
 applyTargetTablesToManifest();

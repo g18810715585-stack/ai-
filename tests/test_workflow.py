@@ -13,6 +13,7 @@ from openpyxl.comments import Comment
 from openpyxl.styles import PatternFill
 
 from ai_meta_agent.cli import analyze_manifest
+from ai_meta_agent.configuration_records import build_configuration_record, local_case_review, save_case_review
 from ai_meta_agent.draft import call_baseai, call_draft_diagnostics_ai, call_experience_summary_ai, call_relationship_ai, make_stub_patch
 from ai_meta_agent.draft_diagnostics import build_draft_diagnostics, compact_draft_diagnostic_context
 from ai_meta_agent.experience import (
@@ -187,6 +188,37 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(len(habits), 1)
             matched = match_habits(habits, "unit-sample", ["shop_pack_config"])
             self.assertEqual(matched[0].habit_id, habit.habit_id)
+
+    def test_overwrite_apply_writes_record_and_case_review(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            planning = tmp / "planning.xlsx"
+            config = tmp / "config.xlsx"
+            make_planning(planning)
+            make_config(config)
+            manifest_path = make_manifest(tmp, planning, config)
+            manifest, schema, _, context = analyze_manifest(manifest_path, tmp, "analysis")
+            patch = make_stub_patch(manifest, schema, context, str(tmp))
+
+            apply_dir = tmp / ".runs" / "overwrite-test"
+            apply_dir.mkdir(parents=True)
+            result = apply_patch(manifest, schema, patch, tmp, apply_dir, write_mode="overwrite")
+            self.assertEqual(result["write_mode"], "overwrite")
+            self.assertTrue(result["backups"])
+            self.assertTrue(result["written_files"])
+            workbook = load_workbook(config, data_only=True)
+            rows = list(workbook["shop_pack_config"].iter_rows(values_only=True))
+            self.assertEqual(rows[2][0], 1002)
+
+            record = build_configuration_record(manifest, patch, result, apply_dir)
+            self.assertEqual(record["write_mode"], "overwrite")
+            self.assertEqual(record["operation_count"], 2)
+            self.assertIn("shop_pack_config", record["target_tables"])
+            review = local_case_review("价格字段要复核，礼包名称不能直接覆盖旧翻译。", record)
+            case = save_case_review(tmp, manifest, patch, result, "价格字段要复核，礼包名称不能直接覆盖旧翻译。", review)
+            self.assertEqual(case["decision"], "corrected")
+            self.assertTrue((tmp / ".knowledge" / "case_examples.jsonl").exists())
+            self.assertIn("价格字段", json.dumps(case, ensure_ascii=False))
 
     def test_teach_experience_writes_local_knowledge(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

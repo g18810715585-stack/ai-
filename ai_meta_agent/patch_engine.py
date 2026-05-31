@@ -164,7 +164,9 @@ def _validate_workbook(workbook: Workbook, schema: SchemaBundle) -> ValidationRe
     return report
 
 
-def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir: Path, run_dir: Path) -> dict[str, Any]:
+def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir: Path, run_dir: Path, write_mode: str = "preview") -> dict[str, Any]:
+    if write_mode not in {"preview", "overwrite"}:
+        raise ValueError("write_mode must be preview or overwrite")
     states = _open_states(manifest, schema, patch, base_dir, run_dir)
     before: dict[str, dict[str, list[dict[str, Any]]]] = {key: _snapshot(state.workbook) for key, state in states.items()}
     rollback_ops: list[PatchOperation] = []
@@ -264,6 +266,8 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
             operation_results.append({"op": operation.op, "target_table": operation.target_table, "affected_rows": len(rows) + len(operation.rows)})
 
     previews: dict[str, str] = {}
+    backups: dict[str, str] = {}
+    written_files: dict[str, str] = {}
     validation_reports: dict[str, Any] = {}
     diffs: dict[str, Any] = {}
     for key, state in states.items():
@@ -271,8 +275,13 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
             backup = run_dir / "backups" / state.source_path.name
             backup.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(state.source_path, backup)
+            backups[key] = str(backup)
         state.workbook.save(state.preview_path)
         previews[key] = str(state.preview_path)
+        if write_mode == "overwrite":
+            state.source_path.parent.mkdir(parents=True, exist_ok=True)
+            state.workbook.save(state.source_path)
+            written_files[key] = str(state.source_path)
         report = _validate_workbook(state.workbook, schema)
         validation_reports[key] = report.model_dump()
         after = _snapshot(state.workbook)
@@ -292,8 +301,11 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
     )
     return {
         "patch_id": patch.patch_id,
+        "write_mode": write_mode,
         "operation_results": operation_results,
         "previews": previews,
+        "backups": backups,
+        "written_files": written_files,
         "diff": diffs,
         "validation": validation_reports,
         "rollback_patch": rollback.model_dump(mode="json", exclude_none=True),

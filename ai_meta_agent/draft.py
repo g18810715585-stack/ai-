@@ -424,3 +424,59 @@ def call_draft_diagnostics_ai(manifest: Manifest, diagnostic_context: dict[str, 
         if raw_response_path:
             write_text(raw_response_path.with_name("draft-diagnostics-ai-invalid-content.txt"), content)
         raise RuntimeError(f"空草案诊断返回的内容不是合法 JSON：{exc}") from exc
+
+
+def call_case_review_ai(manifest: Manifest, review_context: dict[str, Any], raw_response_path: Path | None = None) -> dict[str, Any]:
+    runtime = _resolve_ai_runtime(manifest)
+    api_key = os.environ.get(runtime["api_key_env"])
+    if not api_key:
+        raise RuntimeError(f"缺少真实 AI Key：请在项目根目录 .env 里配置 {runtime['api_key_env']}=你的Key。")
+    base_url = os.environ.get(runtime["base_url_env"], runtime["default_base_url"]).rstrip("/")
+    model = os.environ.get(runtime["model_env"], runtime["default_model"])
+    url = f"{base_url}/chat/completions"
+    body = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a senior game configuration reviewer. The user has inspected Excel outputs and "
+                    "listed problems with one AI-generated configuration run. Summarize the correction into "
+                    "reusable lessons for future draft generation. Return only strict JSON with keys: "
+                    "summary, mistakes, lessons, avoid_next_time, affected_tables, confidence. "
+                    "Do not invent new config values. Use Chinese for user-facing text."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(review_context, ensure_ascii=False),
+            },
+        ],
+        "response_format": {"type": "json_object"},
+        **runtime["extra_body"],
+    }
+    if runtime["temperature"] is not None:
+        body["temperature"] = runtime["temperature"]
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        message = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"{runtime['label']} 案例复盘请求失败：HTTP {exc.code} {message}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"{runtime['label']} 案例复盘网络连接失败：{exc.reason}") from exc
+    if raw_response_path:
+        write_json(raw_response_path, {"provider": runtime["id"], "base_url": base_url, "model": model, "response": payload})
+    content = payload["choices"][0]["message"]["content"]
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as exc:
+        if raw_response_path:
+            write_text(raw_response_path.with_name("case-review-ai-invalid-content.txt"), content)
+        raise RuntimeError(f"案例复盘返回的内容不是合法 JSON：{exc}") from exc

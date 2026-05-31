@@ -8,7 +8,20 @@ from typing import Any
 
 from .ai_context import build_minimal_context, summarize_analysis
 from .config_discovery import discover_config_tables
-from .draft import call_baseai, call_draft_diagnostics_ai, call_experience_summary_ai, call_relationship_ai, make_stub_patch
+from .configuration_records import (
+    build_configuration_record,
+    local_case_review,
+    persist_configuration_record,
+    save_case_review,
+)
+from .draft import (
+    call_baseai,
+    call_case_review_ai,
+    call_draft_diagnostics_ai,
+    call_experience_summary_ai,
+    call_relationship_ai,
+    make_stub_patch,
+)
 from .draft_diagnostics import (
     build_draft_diagnostics,
     compact_draft_diagnostic_context,
@@ -404,13 +417,29 @@ def _patch_markdown(patch: Patch) -> str:
 
 
 def _apply_markdown(result: dict[str, Any]) -> str:
-    lines = [f"# Apply Result {result['patch_id']}", "", "## Operation Results"]
+    lines = [
+        f"# Apply Result {result['patch_id']}",
+        "",
+        f"- Write mode: `{result.get('write_mode', 'preview')}`",
+        "",
+        "## Operation Results",
+    ]
     for item in result["operation_results"]:
         lines.append(f"- `{item['op']}` `{item['target_table']}` affected={item['affected_rows']}")
     lines.append("")
     lines.append("## Preview Files")
     for source, preview in result["previews"].items():
         lines.append(f"- {source} -> {preview}")
+    if result.get("backups"):
+        lines.append("")
+        lines.append("## Backups")
+        for source, backup in result["backups"].items():
+            lines.append(f"- {source} -> {backup}")
+    if result.get("written_files"):
+        lines.append("")
+        lines.append("## Written Files")
+        for source, target in result["written_files"].items():
+            lines.append(f"- {source} -> {target}")
     lines.append("")
     lines.append("## Validation")
     for source, report in result["validation"].items():
@@ -420,6 +449,28 @@ def _apply_markdown(result: dict[str, Any]) -> str:
         lines.append(f"- {source}: errors={errors}, warnings={warnings}, needs_confirmation={needs}")
     lines.append("")
     return "\n".join(lines)
+
+
+def _case_review_markdown(case: dict[str, Any], review: dict[str, Any]) -> str:
+    lines = [
+        f"# 配表案例复盘 {case.get('case_id')}",
+        "",
+        f"- Project: `{case.get('project')}`",
+        f"- Patch: `{case.get('patch_id')}`",
+        f"- Write mode: `{case.get('write_mode')}`",
+        "",
+    ]
+    if review.get("summary"):
+        lines.extend(["## 总结", str(review["summary"]), ""])
+    for title, key in [("问题", "mistakes"), ("经验", "lessons"), ("下次避免", "avoid_next_time")]:
+        values = review.get(key) or []
+        if not values:
+            continue
+        lines.append(f"## {title}")
+        for value in values:
+            lines.append(f"- {value}")
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
 
 
 def cmd_apply(args: argparse.Namespace) -> int:
@@ -436,13 +487,94 @@ def cmd_apply(args: argparse.Namespace) -> int:
     manifest, _ = discover_config_tables(manifest, schema, base_dir)
     patch = Patch.model_validate(read_json(patch_path))
     run_dir = make_run_dir(_run_root(base_dir, manifest), "apply")
-    result = apply_patch(manifest, schema, patch, base_dir, run_dir)
+    result = apply_patch(manifest, schema, patch, base_dir, run_dir, write_mode=args.write_mode)
+    record = build_configuration_record(manifest, patch, result, run_dir)
+    result["configuration_record"] = record
+    result["configuration_record_paths"] = persist_configuration_record(base_dir, record, run_dir)
     write_json(run_dir / "apply-result.json", result)
     write_json(run_dir / "diff.json", result["diff"])
     write_json(run_dir / "validation.json", result["validation"])
     write_json(run_dir / "rollback-patch.json", result["rollback_patch"])
     write_text(run_dir / "apply-result.md", _apply_markdown(result))
-    print(json.dumps({"run_dir": str(run_dir), "result": str(run_dir / "apply-result.json")}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "run_dir": str(run_dir),
+                "result": str(run_dir / "apply-result.json"),
+                "configuration_record": str(run_dir / "configuration-record.json"),
+                "write_mode": args.write_mode,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def cmd_case_review(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    manifest_path = Path(args.manifest)
+    patch_path = Path(args.patch)
+    apply_result_path = Path(args.apply_result)
+    if not manifest_path.is_absolute():
+        manifest_path = base_dir / manifest_path
+    if not patch_path.is_absolute():
+        patch_path = base_dir / patch_path
+    if not apply_result_path.is_absolute():
+        apply_result_path = base_dir / apply_result_path
+    correction_text = args.correction.strip()
+    if not correction_text:
+        raise ValueError("请先填写本次配表的问题或修正建议。")
+
+    manifest = _load_manifest(manifest_path)
+    patch = Patch.model_validate(read_json(patch_path))
+    apply_result = read_json(apply_result_path)
+    run_dir = apply_result_path.parent
+    record = apply_result.get("configuration_record") or build_configuration_record(manifest, patch, apply_result, run_dir)
+    local_review = local_case_review(correction_text, record)
+    ai_review = None
+    ai_error = None
+    if not args.no_ai:
+        try:
+            ai_review = call_case_review_ai(
+                manifest,
+                {
+                    "project": manifest.project,
+                    "correction_text": correction_text,
+                    "configuration_record": record,
+                    "validation_summary": record.get("validation_summary", {}),
+                },
+                run_dir / "case-review-ai-response.json",
+            )
+        except Exception as exc:  # noqa: BLE001 - local review still keeps the learning loop usable.
+            ai_error = str(exc)
+    review = ai_review or local_review
+    review.setdefault("summary", local_review.get("summary"))
+    review.setdefault("mistakes", local_review.get("mistakes", []))
+    review.setdefault("lessons", local_review.get("lessons", []))
+    review.setdefault("avoid_next_time", local_review.get("avoid_next_time", []))
+    review.setdefault("affected_tables", record.get("target_tables", []))
+    review["mode"] = "ai" if ai_review else "local"
+    if ai_error:
+        review["ai_error"] = ai_error
+
+    case = save_case_review(base_dir, manifest, patch, apply_result, correction_text, review)
+    payload = {"case": case, "case_review": review, "configuration_record": record}
+    write_json(run_dir / "case-review.json", payload)
+    write_text(run_dir / "case-review.md", _case_review_markdown(case, review))
+    print(
+        json.dumps(
+            {
+                "run_dir": str(run_dir),
+                "case_review": str(run_dir / "case-review.json"),
+                "case_id": case["case_id"],
+                "mode": review["mode"],
+                "ai_error": ai_error,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -536,7 +668,16 @@ def build_parser() -> argparse.ArgumentParser:
     apply_cmd = sub.add_parser("apply")
     apply_cmd.add_argument("--manifest", required=True)
     apply_cmd.add_argument("--patch", required=True)
+    apply_cmd.add_argument("--write-mode", choices=["preview", "overwrite"], default="preview")
     apply_cmd.set_defaults(func=cmd_apply)
+
+    case_review = sub.add_parser("case-review")
+    case_review.add_argument("--manifest", required=True)
+    case_review.add_argument("--patch", required=True)
+    case_review.add_argument("--apply-result", required=True)
+    case_review.add_argument("--correction", required=True)
+    case_review.add_argument("--no-ai", action="store_true")
+    case_review.set_defaults(func=cmd_case_review)
 
     learn = sub.add_parser("learn")
     learn.add_argument("--manifest", required=True)
