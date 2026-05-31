@@ -19,6 +19,13 @@ const targetDialog = document.querySelector("#targetDialog");
 const tableSearchInput = document.querySelector("#tableSearch");
 const tableList = document.querySelector("#tableList");
 const commonTablesInput = document.querySelector("#commonTablesInput");
+const experienceDialog = document.querySelector("#experienceDialog");
+const experienceSearchInput = document.querySelector("#experienceSearch");
+const experienceList = document.querySelector("#experienceList");
+const experienceEditText = document.querySelector("#experienceEditText");
+const experienceMeta = document.querySelector("#experienceMeta");
+const updateExperienceBtn = document.querySelector("#updateExperienceBtn");
+const deleteExperienceBtn = document.querySelector("#deleteExperienceBtn");
 const tablePresetVersion = "meta-doc-excel-local-learning-v2";
 const tableTierRanks = { core: 0, high: 1, medium: 2, low: 3 };
 const tableTierLabels = { core: "核心", high: "高频", medium: "中频", low: "低频" };
@@ -111,6 +118,8 @@ resetStoredTablesWhenPresetChanges();
 let selectedTargetTables = readJsonStorage("targetTables", []);
 let pendingTargetSelection = new Set();
 let latestExperienceSummary = null;
+let savedExperiences = [];
+let selectedExperienceId = "";
 
 const rememberedFields = [
   ["configDir", configDirInput],
@@ -161,7 +170,7 @@ function setStatus(text, state = "") {
 // Only the clicked workflow button stays enabled while a long backend action runs.
 function setActionBusy(button, label, busy) {
   if (!button) return;
-  const actionButtons = Array.from(document.querySelectorAll(".actions button, .experience-actions button"));
+  const actionButtons = Array.from(document.querySelectorAll(".actions button, .experience-actions button, .history-actions button"));
   if (busy) {
     button.dataset.originalText = button.dataset.originalText || button.textContent;
     button.textContent = `正在${label}...`;
@@ -474,6 +483,121 @@ function saveTargetSelection() {
   applyTargetTablesToManifest();
   closeTargetDialog();
   setStatus(`已选择 ${selectedTargetTables.length} 张目标配置表`, "ok");
+}
+
+function formatTime(value) {
+  if (!value) return "未知时间";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function openExperienceDialog() {
+  experienceDialog.hidden = false;
+  experienceSearchInput.value = "";
+  loadSavedExperiences().catch((error) => setStatus(`加载历史经验失败：${error.message}`, "error"));
+}
+
+function closeExperienceDialog() {
+  experienceDialog.hidden = true;
+}
+
+async function loadSavedExperiences() {
+  const payload = await buildPayload();
+  const data = await callApi("/api/experience-list", payload, { label: "加载历史经验" });
+  const summary = parseStdout(data);
+  savedExperiences = summary.experiences || [];
+  selectedExperienceId = savedExperiences.some((item) => item.experience_id === selectedExperienceId) ? selectedExperienceId : "";
+  renderExperienceList();
+  if (selectedExperienceId) {
+    selectExperience(selectedExperienceId);
+  } else {
+    clearSelectedExperience();
+  }
+}
+
+function renderExperienceList() {
+  const query = experienceSearchInput.value.trim().toLowerCase();
+  const items = savedExperiences.filter((item) => {
+    if (!query) return true;
+    return `${item.title || ""} ${item.text || ""} ${item.project || ""} ${item.source || ""}`.toLowerCase().includes(query);
+  });
+  if (!items.length) {
+    experienceList.innerHTML = '<div class="empty-state">还没有保存的经验。</div>';
+    return;
+  }
+  experienceList.innerHTML = items
+    .map((item) => {
+      const active = item.experience_id === selectedExperienceId ? " active" : "";
+      const counts = item.record_counts || {};
+      const countText = `规则 ${counts.rules || 0} / 模板 ${counts.activity_templates || 0} / 映射 ${counts.field_mappings || 0}`;
+      return `
+        <button class="experience-item${active}" type="button" data-experience-id="${escapeHtml(item.experience_id)}">
+          <strong>${escapeHtml(item.title || "未命名经验")}</strong>
+          <small>录入：${escapeHtml(formatTime(item.created_at))}</small>
+          <small>更新：${escapeHtml(formatTime(item.updated_at))} · ${escapeHtml(item.project || "default")}</small>
+          <small>${escapeHtml(countText)}${item.legacy ? " · 旧记录" : ""}</small>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function selectExperience(experienceId) {
+  const item = savedExperiences.find((value) => value.experience_id === experienceId);
+  if (!item) {
+    clearSelectedExperience();
+    return;
+  }
+  selectedExperienceId = experienceId;
+  experienceEditText.value = item.text || "";
+  const counts = item.record_counts || {};
+  experienceMeta.textContent = [
+    `标题：${item.title || "未命名经验"}`,
+    `项目：${item.project || "default"}`,
+    `来源：${item.source || "未知"}`,
+    `录入时间：${formatTime(item.created_at)}`,
+    `更新时间：${formatTime(item.updated_at)}`,
+    `结构化记录：规则 ${counts.rules || 0}，模板 ${counts.activity_templates || 0}，字段映射 ${counts.field_mappings || 0}`,
+  ].join("\n");
+  updateExperienceBtn.disabled = !experienceEditText.value.trim();
+  deleteExperienceBtn.disabled = false;
+  renderExperienceList();
+}
+
+function clearSelectedExperience() {
+  selectedExperienceId = "";
+  experienceEditText.value = "";
+  experienceMeta.textContent = "请选择一条经验。";
+  updateExperienceBtn.disabled = true;
+  deleteExperienceBtn.disabled = true;
+}
+
+async function updateSelectedExperience() {
+  if (!selectedExperienceId) throw new Error("请先选择一条经验");
+  const text = experienceEditText.value.trim();
+  if (!text) throw new Error("经验内容不能为空");
+  const payload = await buildPayload();
+  payload.experience_id = selectedExperienceId;
+  payload.experience_text = text;
+  const data = await callApi("/api/experience-update", payload, { label: "保存经验修改" });
+  resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
+  await loadSavedExperiences();
+  selectExperience(selectedExperienceId);
+  showTab("result");
+}
+
+async function deleteSelectedExperience() {
+  if (!selectedExperienceId) throw new Error("请先选择一条经验");
+  const item = savedExperiences.find((value) => value.experience_id === selectedExperienceId);
+  if (!window.confirm(`确定删除这条经验吗？\n${item?.title || selectedExperienceId}`)) return;
+  const payload = await buildPayload();
+  payload.experience_id = selectedExperienceId;
+  const data = await callApi("/api/experience-delete", payload, { label: "删除经验" });
+  resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
+  selectedExperienceId = "";
+  await loadSavedExperiences();
+  showTab("result");
 }
 
 function saveRememberedInputs() {
@@ -863,6 +987,10 @@ async function runAction(event, action) {
     setStatus(`${label}失败：${error.message}`, "error");
   } finally {
     setActionBusy(button, label, false);
+    saveExperienceBtn.disabled = !experienceSummaryText.value.trim();
+    const hasSelectedExperience = Boolean(selectedExperienceId);
+    updateExperienceBtn.disabled = !hasSelectedExperience || !experienceEditText.value.trim();
+    deleteExperienceBtn.disabled = !hasSelectedExperience;
   }
 }
 
@@ -927,8 +1055,25 @@ tableList.addEventListener("change", (event) => {
 targetDialog.addEventListener("click", (event) => {
   if (event.target === targetDialog) closeTargetDialog();
 });
+document.querySelector("#openExperienceDialog").addEventListener("click", openExperienceDialog);
+document.querySelector("#closeExperienceDialog").addEventListener("click", closeExperienceDialog);
+document.querySelector("#refreshExperienceList").addEventListener("click", (event) => runAction(event, loadSavedExperiences));
+experienceSearchInput.addEventListener("input", renderExperienceList);
+experienceList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-experience-id]");
+  if (button) selectExperience(button.dataset.experienceId);
+});
+experienceEditText.addEventListener("input", () => {
+  updateExperienceBtn.disabled = !selectedExperienceId || !experienceEditText.value.trim();
+});
+updateExperienceBtn.addEventListener("click", (event) => runAction(event, updateSelectedExperience));
+deleteExperienceBtn.addEventListener("click", (event) => runAction(event, deleteSelectedExperience));
+experienceDialog.addEventListener("click", (event) => {
+  if (event.target === experienceDialog) closeExperienceDialog();
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !targetDialog.hidden) closeTargetDialog();
+  if (event.key === "Escape" && !experienceDialog.hidden) closeExperienceDialog();
 });
 
 document.querySelector("#schemaScanBtn").addEventListener("click", (event) => runAction(event, async (label) => {
@@ -985,6 +1130,7 @@ saveExperienceBtn.addEventListener("click", (event) => runAction(event, async (l
     2
   );
   showTab("result");
+  if (!experienceDialog.hidden) await loadSavedExperiences();
 }));
 
 document.querySelector("#activityPlanBtn").addEventListener("click", (event) => runAction(event, async (label) => {

@@ -15,7 +15,16 @@ from openpyxl.styles import PatternFill
 from ai_meta_agent.cli import analyze_manifest
 from ai_meta_agent.draft import call_baseai, call_draft_diagnostics_ai, call_experience_summary_ai, call_relationship_ai, make_stub_patch
 from ai_meta_agent.draft_diagnostics import build_draft_diagnostics, compact_draft_diagnostic_context
-from ai_meta_agent.experience import append_case_from_patch, build_experience_context, merge_experience_summary, summarize_experience_locally, teach_experience
+from ai_meta_agent.experience import (
+    append_case_from_patch,
+    build_experience_context,
+    delete_saved_experience,
+    list_saved_experiences,
+    merge_experience_summary,
+    summarize_experience_locally,
+    teach_experience,
+    update_saved_experience,
+)
 from ai_meta_agent.feishu import FeishuSourcePayload
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
 from ai_meta_agent.io_utils import read_json, write_json
@@ -192,6 +201,35 @@ class WorkflowTests(unittest.TestCase):
             self.assertGreaterEqual(result["created"]["field_mappings"], 2)
             self.assertTrue((tmp / ".knowledge" / "rules.jsonl").exists())
             self.assertTrue((tmp / ".knowledge" / "activity_templates.jsonl").read_text(encoding="utf-8").strip())
+
+    def test_saved_experience_history_update_and_delete(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            result = teach_experience(
+                tmp,
+                "history-sample",
+                "兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key。商品名 -> goods.name。",
+            )
+            experience_id = result["experience_id"]
+            listed = list_saved_experiences(tmp, project="history-sample")
+            self.assertEqual(listed["count"], 1)
+            self.assertEqual(listed["experiences"][0]["experience_id"], experience_id)
+            self.assertTrue(listed["experiences"][0]["created_at"])
+
+            updated = update_saved_experience(
+                tmp,
+                experience_id,
+                "兑换商店活动一般要看 activity、exchange、reward。价格 -> exchange.price。",
+                project="history-sample",
+            )
+            self.assertEqual(updated["experience"]["experience_id"], experience_id)
+            self.assertIn("价格", updated["experience"]["text"])
+            rules = [json.loads(line) for line in (tmp / ".knowledge" / "rules.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len([item for item in rules if item.get("experience_id") == experience_id]), 1)
+
+            deleted = delete_saved_experience(tmp, experience_id)
+            self.assertEqual(deleted["deleted"], experience_id)
+            self.assertEqual(list_saved_experiences(tmp, project="history-sample")["count"], 0)
 
     def test_experience_summary_is_reviewed_before_save(self) -> None:
         local = summarize_experience_locally(

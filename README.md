@@ -124,14 +124,16 @@ http://127.0.0.1:4321
 
 1. 在面板“经验录入”里写一条自然语言规则，然后点“AI 整理经验”。工具会先把口语化经验整理成可编辑文本，不会立刻保存。
 2. 检查“整理结果”，必要时手动改几句，再点“保存整理结果”。经验会保存到本地 `.knowledge`，默认不进 Git。
-3. 填好飞书规划链接、配置表目录，并选择这次活动的主要目标配置表后，点“识别活动模板”。工具会输出“配表计划”和“待确认字段”。
-4. 确认计划后再点“分析关联关系”和“生成草案”。草案只会生成待审核 Patch，低置信字段会进“待确认字段”，不会硬写。
+3. 需要回看或维护经验时，点“查看历史经验”，可以按录入时间查看、搜索、修改或删除经验。
+4. 填好飞书规划链接、配置表目录，并选择这次活动的主要目标配置表后，点“识别活动模板”。工具会输出“配表计划”和“待确认字段”。
+5. 确认计划后再点“分析关联关系”和“生成草案”。草案只会生成待审核 Patch，低置信字段会进“待确认字段”，不会硬写。
 
 CLI 也可以录入经验和生成配表计划：
 
 ```powershell
 node src/cli.mjs teach --manifest fixtures/sample.manifest.json --text "兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key"
 node src/cli.mjs experience-summary --manifest fixtures/sample.manifest.json --text "规划里商品名通常对应 goods.name，价格对应 exchange.price"
+node src/cli.mjs experience-list --manifest fixtures/sample.manifest.json
 node src/cli.mjs plan --manifest fixtures/sample.manifest.json
 ```
 
@@ -146,6 +148,7 @@ schema-scan  扫描配置表目录，生成 Schema 草案和配置 sheet 报告
 relations  分析已选目标表的一跳/二跳关联关系
 teach    写入一条自然语言配表经验到本地知识库
 experience-summary  先用 AI/本地规则整理经验，生成可审核文本
+experience-list / experience-update / experience-delete  管理历史经验
 plan     识别活动模板并生成配表计划
 draft    生成配置 patch，可调用公司 BI，也可使用 --stub 本地草案
 apply    执行 patch，生成 preview、diff、validation、rollback

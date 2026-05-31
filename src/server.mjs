@@ -439,6 +439,12 @@ async function handleApi(req, res, projectRoot) {
     args = ["teach", "--manifest", manifestPath, "--text", payload.experience_text || "", "--source", "panel"];
   } else if (url.pathname === "/api/experience-summary") {
     args = ["experience-summary", "--manifest", manifestPath, "--text", payload.experience_text || ""];
+  } else if (url.pathname === "/api/experience-list") {
+    args = ["experience-list", "--manifest", manifestPath];
+  } else if (url.pathname === "/api/experience-update") {
+    args = ["experience-update", "--manifest", manifestPath, "--experience-id", payload.experience_id || "", "--text", payload.experience_text || "", "--source", "panel"];
+  } else if (url.pathname === "/api/experience-delete") {
+    args = ["experience-delete", "--experience-id", payload.experience_id || ""];
   } else if (url.pathname === "/api/activity-plan") {
     args = ["plan", "--manifest", manifestPath];
   } else if (url.pathname === "/api/schema-scan") {

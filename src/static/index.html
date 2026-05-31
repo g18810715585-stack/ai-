@@ -48,6 +48,7 @@
           <div class="experience-actions">
             <button id="teachBtn" type="button">AI 整理经验</button>
             <button id="saveExperienceBtn" type="button" disabled>保存整理结果</button>
+            <button id="openExperienceDialog" type="button">查看历史经验</button>
             <button id="activityPlanBtn" type="button">识别活动模板</button>
           </div>
           <label class="experience-summary">
@@ -157,6 +158,35 @@
             <button id="saveTargetSelection" class="primary-button" type="button">保存选择</button>
           </div>
         </footer>
+      </section>
+    </div>
+
+    <div id="experienceDialog" class="dialog-backdrop" hidden>
+      <section class="dialog-panel experience-panel" role="dialog" aria-modal="true" aria-labelledby="experienceDialogTitle">
+        <header class="dialog-header">
+          <div>
+            <h2 id="experienceDialogTitle">历史经验</h2>
+            <p>查看已经保存的配表经验，支持修改内容或删除不再适用的经验。</p>
+          </div>
+          <button id="closeExperienceDialog" class="icon-button" type="button" aria-label="关闭">×</button>
+        </header>
+
+        <div class="dialog-tools">
+          <input id="experienceSearch" placeholder="搜索标题、内容、来源或项目" />
+          <button id="refreshExperienceList" type="button">刷新经验</button>
+        </div>
+
+        <div class="experience-history">
+          <div id="experienceList" class="experience-list"></div>
+          <section class="experience-editor">
+            <div id="experienceMeta" class="experience-meta">请选择一条经验。</div>
+            <textarea id="experienceEditText" spellcheck="false" placeholder="选择历史经验后可以在这里修改。"></textarea>
+            <div class="history-actions">
+              <button id="updateExperienceBtn" type="button" disabled>保存修改</button>
+              <button id="deleteExperienceBtn" type="button" disabled>删除经验</button>
+            </div>
+          </section>
+        </div>
       </section>
     </div>
 

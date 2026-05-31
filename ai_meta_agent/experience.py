@@ -11,10 +11,18 @@ from .models import Manifest, Patch, SchemaBundle, WorkbookIR
 
 
 KNOWLEDGE_FILES = {
+    "experiences": "experiences.jsonl",
     "rules": "rules.jsonl",
     "activity_templates": "activity_templates.jsonl",
     "field_mappings": "field_mappings.jsonl",
     "case_examples": "case_examples.jsonl",
+}
+
+RECORD_ID_FIELDS = {
+    "rules": "rule_id",
+    "activity_templates": "template_id",
+    "field_mappings": "mapping_id",
+    "case_examples": "case_id",
 }
 
 
@@ -202,16 +210,107 @@ def teach_experience(base_dir: Path, project: str, text: str, source: str = "man
     if not text:
         raise ValueError("经验内容不能为空")
 
+    experience_id = _stable_id("experience", project, text, now)
     records = parse_experience_text(project, text, source=source, timestamp=now)
+    _attach_experience_id(records, experience_id)
     for kind, items in records.items():
         path = root / KNOWLEDGE_FILES[kind]
         for item in items:
             _append_jsonl(path, item)
+    entry = _experience_entry(experience_id, project, text, source, now, now, records)
+    _append_jsonl(root / KNOWLEDGE_FILES["experiences"], entry)
     return {
+        "experience_id": experience_id,
         "store": str(root),
         "created": {kind: len(items) for kind, items in records.items()},
+        "entry": entry,
         "records": records,
     }
+
+
+def list_saved_experiences(base_dir: Path, project: str | None = None) -> dict[str, Any]:
+    root = knowledge_dir(base_dir)
+    entries = _load_jsonl(root / KNOWLEDGE_FILES["experiences"])
+    entry_ids = {item.get("experience_id") for item in entries}
+    for rule in _load_jsonl(root / KNOWLEDGE_FILES["rules"]):
+        if rule.get("experience_id") in entry_ids or rule.get("rule_id") in entry_ids:
+            continue
+        entries.append(
+            {
+                "experience_id": rule.get("experience_id") or rule.get("rule_id"),
+                "project": rule.get("project", "default"),
+                "title": rule.get("title") or str(rule.get("text", ""))[:40] or "历史经验",
+                "text": rule.get("text", ""),
+                "source": rule.get("source", "legacy"),
+                "created_at": rule.get("created_at") or rule.get("last_used_at"),
+                "updated_at": rule.get("last_used_at") or rule.get("created_at"),
+                "record_counts": {"rules": 1, "activity_templates": 0, "field_mappings": 0, "case_examples": 0},
+                "record_refs": {"rules": [rule.get("rule_id")], "activity_templates": [], "field_mappings": [], "case_examples": []},
+                "legacy": True,
+            }
+        )
+    if project:
+        entries = [item for item in entries if item.get("project") == project]
+    entries = [_normalize_experience_entry(item) for item in entries if item.get("experience_id")]
+    entries.sort(key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=True)
+    return {"store": str(root), "count": len(entries), "experiences": entries}
+
+
+def update_saved_experience(base_dir: Path, experience_id: str, text: str, project: str | None = None, source: str = "panel") -> dict[str, Any]:
+    root = knowledge_dir(base_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    text = text.strip()
+    if not text:
+        raise ValueError("经验内容不能为空")
+    entries = _load_jsonl(root / KNOWLEDGE_FILES["experiences"])
+    index = next((idx for idx, item in enumerate(entries) if item.get("experience_id") == experience_id), -1)
+    now = _now()
+    created_at = now
+    record_refs: dict[str, list[str]] = {}
+    if index >= 0:
+        entry = entries[index]
+        created_at = entry.get("created_at") or now
+        project = project or entry.get("project") or "default"
+        record_refs = entry.get("record_refs") or {}
+    else:
+        legacy = _find_legacy_rule(root, experience_id)
+        if not legacy:
+            raise ValueError(f"未找到经验：{experience_id}")
+        created_at = legacy.get("created_at") or now
+        project = project or legacy.get("project") or "default"
+        record_refs = {"rules": [legacy.get("rule_id")], "activity_templates": [], "field_mappings": [], "case_examples": []}
+
+    _remove_experience_records(root, experience_id, record_refs)
+    records = parse_experience_text(project or "default", text, source=source, timestamp=now)
+    _attach_experience_id(records, experience_id)
+    for kind, items in records.items():
+        for item in items:
+            _append_jsonl(root / KNOWLEDGE_FILES[kind], item)
+    updated = _experience_entry(experience_id, project or "default", text, source, created_at, now, records)
+    if index >= 0:
+        entries[index] = updated
+    else:
+        entries.append(updated)
+    _write_jsonl(root / KNOWLEDGE_FILES["experiences"], entries)
+    return {"store": str(root), "experience": updated, "updated": {kind: len(items) for kind, items in records.items()}}
+
+
+def delete_saved_experience(base_dir: Path, experience_id: str) -> dict[str, Any]:
+    root = knowledge_dir(base_dir)
+    entries = _load_jsonl(root / KNOWLEDGE_FILES["experiences"])
+    removed = [item for item in entries if item.get("experience_id") == experience_id]
+    kept = [item for item in entries if item.get("experience_id") != experience_id]
+    record_refs = removed[0].get("record_refs") if removed else {}
+    if not removed:
+        legacy = _find_legacy_rule(root, experience_id)
+        if legacy:
+            record_refs = {"rules": [legacy.get("rule_id")], "activity_templates": [], "field_mappings": [], "case_examples": []}
+            removed = [{"experience_id": experience_id, "legacy": True}]
+    if not removed:
+        raise ValueError(f"未找到经验：{experience_id}")
+    _remove_experience_records(root, experience_id, record_refs)
+    _write_jsonl(root / KNOWLEDGE_FILES["experiences"], kept)
+    return {"store": str(root), "deleted": experience_id, "remaining": len(kept)}
 
 
 def parse_experience_text(project: str, text: str, source: str = "manual", timestamp: str | None = None) -> dict[str, list[dict[str, Any]]]:
@@ -703,6 +802,91 @@ def _field_exists(schema: SchemaBundle, table_name: str | None, field_name: str 
     return field_name in table.fields or field_name in table.primary_key
 
 
+def _attach_experience_id(records: dict[str, list[dict[str, Any]]], experience_id: str) -> None:
+    for items in records.values():
+        for item in items:
+            item["experience_id"] = experience_id
+
+
+def _experience_entry(
+    experience_id: str,
+    project: str,
+    text: str,
+    source: str,
+    created_at: str,
+    updated_at: str,
+    records: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    return {
+        "experience_id": experience_id,
+        "project": project,
+        "title": _entry_title(text),
+        "text": text,
+        "source": source,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "record_counts": {kind: len(items) for kind, items in records.items()},
+        "record_refs": _record_refs(records),
+    }
+
+
+def _entry_title(text: str) -> str:
+    for line in text.splitlines():
+        line = line.strip().lstrip("-# ")
+        if not line:
+            continue
+        if line.startswith("经验标题"):
+            _, _, value = line.partition("：")
+            line = value.strip() or line
+        return line[:48]
+    return "配表经验"
+
+
+def _record_refs(records: dict[str, list[dict[str, Any]]]) -> dict[str, list[str]]:
+    refs: dict[str, list[str]] = {}
+    for kind, items in records.items():
+        id_field = RECORD_ID_FIELDS.get(kind)
+        refs[kind] = [str(item.get(id_field)) for item in items if id_field and item.get(id_field)]
+    return refs
+
+
+def _normalize_experience_entry(item: dict[str, Any]) -> dict[str, Any]:
+    text = str(item.get("text") or "")
+    return {
+        "experience_id": item.get("experience_id"),
+        "project": item.get("project", "default"),
+        "title": item.get("title") or _entry_title(text),
+        "text": text,
+        "source": item.get("source", ""),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at") or item.get("created_at"),
+        "record_counts": item.get("record_counts") or {},
+        "record_refs": item.get("record_refs") or {},
+        "legacy": bool(item.get("legacy")),
+    }
+
+
+def _find_legacy_rule(root: Path, experience_id: str) -> dict[str, Any] | None:
+    for rule in _load_jsonl(root / KNOWLEDGE_FILES["rules"]):
+        if rule.get("rule_id") == experience_id or rule.get("experience_id") == experience_id:
+            return rule
+    return None
+
+
+def _remove_experience_records(root: Path, experience_id: str, record_refs: dict[str, list[str]] | None) -> None:
+    record_refs = record_refs or {}
+    for kind, id_field in RECORD_ID_FIELDS.items():
+        path = root / KNOWLEDGE_FILES[kind]
+        ids = {item for item in record_refs.get(kind, []) if item}
+        kept = []
+        for item in _load_jsonl(path):
+            item_id = item.get(id_field)
+            if item.get("experience_id") == experience_id or item_id in ids:
+                continue
+            kept.append(item)
+        _write_jsonl(path, kept)
+
+
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -723,6 +907,14 @@ def _append_jsonl(path: Path, item: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(item, ensure_ascii=False, separators=(",", ":")))
         handle.write("\n")
+
+
+def _write_jsonl(path: Path, items: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for item in items:
+            handle.write(json.dumps(item, ensure_ascii=False, separators=(",", ":")))
+            handle.write("\n")
 
 
 def _dedupe_records(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:

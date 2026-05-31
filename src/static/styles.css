@@ -239,6 +239,77 @@ button:disabled {
   max-height: 260px;
 }
 
+.experience-panel {
+  grid-template-rows: auto auto minmax(260px, 1fr);
+}
+
+.experience-history {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.4fr);
+  min-height: 0;
+}
+
+.experience-list {
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  padding: 8px;
+}
+
+.experience-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin-bottom: 6px;
+  border-color: transparent;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.experience-item:hover,
+.experience-item.active {
+  border-color: #b9d8d1;
+  background: #eef8f5;
+}
+
+.experience-item strong,
+.experience-item small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.experience-item small,
+.experience-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.experience-editor {
+  display: grid;
+  grid-template-rows: auto minmax(160px, 1fr) auto;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px;
+}
+
+.experience-editor textarea {
+  min-height: 0;
+  resize: none;
+  font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+  font-size: 13px;
+}
+
+.history-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.history-actions button:last-child {
+  border-color: #efb2a8;
+  color: var(--danger);
+}
+
 .target-summary {
   display: flex;
   flex-wrap: wrap;
@@ -645,13 +716,21 @@ pre {
 
   .target-picker,
   .common-editor,
-  .experience-actions {
+  .experience-actions,
+  .experience-history {
     grid-template-columns: 1fr;
+  }
+
+  .experience-list {
+    max-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .target-picker button,
   .dialog-tools button,
-  .common-actions button {
+  .common-actions button,
+  .history-actions button {
     width: 100%;
   }
 
@@ -661,6 +740,7 @@ pre {
 
   .dialog-tools,
   .common-actions,
+  .history-actions,
   .dialog-footer,
   .dialog-footer-actions {
     align-items: stretch;

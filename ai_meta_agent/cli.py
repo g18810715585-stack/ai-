@@ -17,10 +17,13 @@ from .draft_diagnostics import (
 from .experience import (
     append_case_from_patch,
     build_experience_context,
+    delete_saved_experience,
     experience_context_payload,
+    list_saved_experiences,
     merge_experience_summary,
     summarize_experience_locally,
     teach_experience,
+    update_saved_experience,
 )
 from .habits import append_habit, habit_from_patch, load_habits, match_habits
 from .io_utils import make_run_dir, read_json, write_json, write_text
@@ -200,6 +203,39 @@ def cmd_experience_summary(args: argparse.Namespace) -> int:
             indent=2,
         )
     )
+    return 0
+
+
+def cmd_experience_list(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    project = args.project
+    if args.manifest:
+        manifest_path = Path(args.manifest)
+        if not manifest_path.is_absolute():
+            manifest_path = base_dir / manifest_path
+        project = _load_manifest(manifest_path).project
+    result = list_saved_experiences(base_dir, project=project)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_experience_update(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    project = args.project
+    if args.manifest:
+        manifest_path = Path(args.manifest)
+        if not manifest_path.is_absolute():
+            manifest_path = base_dir / manifest_path
+        project = _load_manifest(manifest_path).project
+    result = update_saved_experience(base_dir, args.experience_id, args.text, project=project, source=args.source)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_experience_delete(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    result = delete_saved_experience(base_dir, args.experience_id)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -453,6 +489,23 @@ def build_parser() -> argparse.ArgumentParser:
     experience_summary.add_argument("--text", required=True)
     experience_summary.add_argument("--no-ai", action="store_true")
     experience_summary.set_defaults(func=cmd_experience_summary)
+
+    experience_list = sub.add_parser("experience-list")
+    experience_list.add_argument("--manifest", default=None)
+    experience_list.add_argument("--project", default=None)
+    experience_list.set_defaults(func=cmd_experience_list)
+
+    experience_update = sub.add_parser("experience-update")
+    experience_update.add_argument("--manifest", default=None)
+    experience_update.add_argument("--project", default=None)
+    experience_update.add_argument("--experience-id", required=True)
+    experience_update.add_argument("--text", required=True)
+    experience_update.add_argument("--source", default="panel")
+    experience_update.set_defaults(func=cmd_experience_update)
+
+    experience_delete = sub.add_parser("experience-delete")
+    experience_delete.add_argument("--experience-id", required=True)
+    experience_delete.set_defaults(func=cmd_experience_delete)
 
     plan = sub.add_parser("plan")
     plan.add_argument("--manifest", required=True)
