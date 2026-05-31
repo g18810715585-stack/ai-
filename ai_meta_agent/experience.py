@@ -366,13 +366,19 @@ def parse_experience_text(project: str, text: str, source: str = "manual", times
     }
 
 
-def summarize_experience_locally(project: str, text: str, source: str = "summary_preview") -> dict[str, Any]:
+def summarize_experience_locally(
+    project: str,
+    text: str,
+    source: str = "summary_preview",
+    existing_experiences: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     text = text.strip()
     if not text:
         raise ValueError("经验内容不能为空")
     records = parse_experience_text(project, text, source=source)
     table_names = _extract_table_names(text)
     scenario_tags = _scenario_tags(text)
+    conflicts = detect_experience_conflicts(project, text, records, existing_experiences or [])
     review_text = _render_review_text(
         title=_summary_title(text, scenario_tags),
         raw_text=text,
@@ -390,6 +396,9 @@ def summarize_experience_locally(project: str, text: str, source: str = "summary
         "personal_rules": records["rules"],
         "questions": _local_questions(records, text),
         "risk_notes": ["保存前请确认这些规则只影响待审核草案，不会直接写配置表。"],
+        "conflicts": conflicts,
+        "has_conflicts": bool(conflicts),
+        "conflict_source": "local",
         "records_preview": records,
     }
 
@@ -406,6 +415,8 @@ def merge_experience_summary(project: str, raw_text: str, local_summary: dict[st
     if not review_text:
         review_text = _render_ai_review_text(raw_text, ai_summary)
     records = parse_experience_text(project, review_text, source="ai_summary_preview")
+    ai_conflicts = _normalize_conflicts(ai_summary.get("conflicts"))
+    conflicts = ai_conflicts or local_summary.get("conflicts", [])
     return {
         "mode": "ai",
         "summary_title": str(ai_summary.get("summary_title") or local_summary.get("summary_title") or _summary_title(raw_text, [])),
@@ -415,6 +426,9 @@ def merge_experience_summary(project: str, raw_text: str, local_summary: dict[st
         "personal_rules": _list_of_dicts(ai_summary.get("personal_rules")),
         "questions": _string_list(ai_summary.get("questions")),
         "risk_notes": _string_list(ai_summary.get("risk_notes")) or local_summary.get("risk_notes", []),
+        "conflicts": conflicts,
+        "has_conflicts": bool(conflicts),
+        "conflict_source": "ai" if ai_conflicts else local_summary.get("conflict_source", "local"),
         "records_preview": records,
         "local_preview": local_summary,
     }
@@ -633,6 +647,164 @@ def _local_questions(records: dict[str, list[dict[str, Any]]], text: str) -> lis
     if not _extract_table_names(text):
         questions.append("这条经验适用于哪些配置表？")
     return questions
+
+
+def detect_experience_conflicts(
+    project: str,
+    text: str,
+    records: dict[str, list[dict[str, Any]]],
+    existing_experiences: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    conflicts: list[dict[str, Any]] = []
+    new_tables = set(_extract_table_names(text))
+    new_scenarios = set(_scenario_tags(text))
+    new_mappings = _mapping_targets(records.get("field_mappings", []))
+    new_policy = _policy_flags(text)
+
+    for existing in existing_experiences:
+        existing_text = str(existing.get("text") or existing.get("review_text") or "")
+        if not existing_text.strip():
+            continue
+        existing_records = parse_experience_text(str(existing.get("project") or project), existing_text, source="conflict_scan")
+        existing_tables = set(_extract_table_names(existing_text))
+        existing_scenarios = set(_scenario_tags(existing_text))
+        related = bool((new_tables & existing_tables) or (new_scenarios & existing_scenarios) or not (new_tables or existing_tables))
+
+        for alias, target in new_mappings.items():
+            old_target = _mapping_targets(existing_records.get("field_mappings", [])).get(alias)
+            if old_target and old_target != target:
+                conflicts.append(
+                    _conflict_item(
+                        "field_mapping",
+                        existing,
+                        f"字段映射冲突：{alias} 在新经验中指向 {target}，旧经验中指向 {old_target}",
+                        new_value=f"{alias} -> {target}",
+                        existing_value=f"{alias} -> {old_target}",
+                        severity="high",
+                    )
+                )
+
+        if related:
+            old_policy = _policy_flags(existing_text)
+            for left, right, reason in [
+                ("preserve", "overwrite", "一个经验要求保留旧值，另一个经验倾向覆盖/改写。"),
+                ("manual_confirm", "auto_write", "一个经验要求人工确认，另一个经验倾向自动写入。"),
+                ("reuse_id", "new_id", "一个经验要求复用旧 ID，另一个经验倾向每次新建 ID。"),
+            ]:
+                if new_policy[left] and old_policy[right]:
+                    conflicts.append(
+                        _conflict_item("rule_policy", existing, reason, new_value=left, existing_value=right, severity="medium")
+                    )
+                if new_policy[right] and old_policy[left]:
+                    conflicts.append(
+                        _conflict_item("rule_policy", existing, reason, new_value=right, existing_value=left, severity="medium")
+                    )
+
+        if len(conflicts) >= 10:
+            break
+    return _dedupe_conflicts(conflicts)
+
+
+def _mapping_targets(mappings: list[dict[str, Any]]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for mapping in mappings:
+        target = f"{mapping.get('target_table')}.{mapping.get('target_field')}"
+        if "." not in target or target.startswith("None.") or target.endswith(".None"):
+            continue
+        for alias in mapping.get("source_aliases", []):
+            key = _norm(str(alias))
+            if key:
+                result[key] = target
+    return result
+
+
+def _policy_flags(text: str) -> dict[str, bool]:
+    normalized = _norm(text)
+    preserve = any(word in normalized for word in ["保留", "不覆盖", "不要覆盖", "沿用", "保留旧值"])
+    overwrite = any(word in normalized for word in ["覆盖", "改写", "替换", "重填", "直接写"])
+    if preserve and any(word in normalized for word in ["不覆盖", "不要覆盖"]):
+        overwrite = False
+    manual_confirm = any(word in normalized for word in ["人工确认", "手动确认", "待确认", "不要自动", "必须确认"])
+    auto_write = any(word in normalized for word in ["自动写", "自动补齐", "直接生成", "无需确认"])
+    if manual_confirm and "不要自动" in normalized:
+        auto_write = False
+    reuse_id = any(word in normalized for word in ["复用id", "沿用id", "保留id", "不要新建id"])
+    new_id = any(word in normalized for word in ["新建id", "每次新建", "重新生成id", "新开id"])
+    if reuse_id and "不要新建id" in normalized:
+        new_id = False
+    return {
+        "preserve": preserve,
+        "overwrite": overwrite,
+        "manual_confirm": manual_confirm,
+        "auto_write": auto_write,
+        "reuse_id": reuse_id,
+        "new_id": new_id,
+    }
+
+
+def _conflict_item(
+    conflict_type: str,
+    existing: dict[str, Any],
+    reason: str,
+    new_value: str,
+    existing_value: str,
+    severity: str,
+) -> dict[str, Any]:
+    return {
+        "conflict_id": _stable_id("experience-conflict", conflict_type, existing.get("experience_id"), reason, new_value, existing_value),
+        "conflict_type": conflict_type,
+        "severity": severity,
+        "existing_experience_id": existing.get("experience_id"),
+        "existing_title": existing.get("title") or "历史经验",
+        "existing_created_at": existing.get("created_at"),
+        "reason": reason,
+        "new_value": new_value,
+        "existing_value": existing_value,
+        "recommendation": "保存前请确认这条新经验是否要覆盖你的旧习惯，或改写为更明确的适用场景。",
+    }
+
+
+def _normalize_conflicts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    conflicts = []
+    for item in value:
+        if isinstance(item, dict):
+            reason = str(item.get("reason") or item.get("summary") or "").strip()
+            if reason:
+                conflicts.append(
+                    {
+                        "conflict_id": str(item.get("conflict_id") or _stable_id("experience-conflict-ai", reason))[:32],
+                        "conflict_type": str(item.get("conflict_type") or item.get("type") or "ai_review"),
+                        "severity": str(item.get("severity") or "medium"),
+                        "existing_experience_id": item.get("existing_experience_id"),
+                        "existing_title": item.get("existing_title") or item.get("title"),
+                        "existing_created_at": item.get("existing_created_at"),
+                        "reason": reason,
+                        "new_value": str(item.get("new_value") or ""),
+                        "existing_value": str(item.get("existing_value") or ""),
+                        "recommendation": str(item.get("recommendation") or "保存前请确认是否继续录入。"),
+                    }
+                )
+    return _dedupe_conflicts(conflicts)
+
+
+def _dedupe_conflicts(conflicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen = set()
+    result = []
+    for conflict in conflicts:
+        key = (
+            conflict.get("conflict_type"),
+            conflict.get("existing_experience_id"),
+            conflict.get("reason"),
+            conflict.get("new_value"),
+            conflict.get("existing_value"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(conflict)
+    return result[:10]
 
 
 def _list_of_dicts(value: Any) -> list[dict[str, Any]]:

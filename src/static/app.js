@@ -29,6 +29,8 @@ const experienceSearchInput = document.querySelector("#experienceSearch");
 const experienceList = document.querySelector("#experienceList");
 const experienceEditText = document.querySelector("#experienceEditText");
 const experienceMeta = document.querySelector("#experienceMeta");
+const experienceConflictPanel = document.querySelector("#experienceConflictPanel");
+const experienceConflictText = document.querySelector("#experienceConflictText");
 const updateExperienceBtn = document.querySelector("#updateExperienceBtn");
 const deleteExperienceBtn = document.querySelector("#deleteExperienceBtn");
 const caseCorrectionText = document.querySelector("#caseCorrectionText");
@@ -366,6 +368,12 @@ function restoreProjectSteps(project) {
   }
   const diagnostics = steps.draft?.data?.draftDiagnostics;
   if (diagnostics) diagnosticsText.textContent = formatDraftDiagnostics(diagnostics);
+  const experienceSummary = steps.experienceSummary?.data?.experienceSummary;
+  if (experienceSummary) {
+    latestExperienceSummary = experienceSummary;
+    if (experienceSummary.review_text) experienceSummaryText.value = experienceSummary.review_text;
+    renderExperienceConflicts(experienceSummary);
+  }
   const applyStep = steps.applyOverwrite || steps.applyPreview;
   if (applyStep?.data) {
     lastApplyResult = applyStep.data.result || null;
@@ -413,6 +421,7 @@ const stepLabels = {
   analyze: "分析表格",
   activityPlan: "活动模板",
   draft: "草案",
+  experienceSummary: "经验整理",
   applyPreview: "预览",
   applyOverwrite: "覆盖",
   caseReview: "复盘",
@@ -451,6 +460,15 @@ function showProjectStep(step) {
     if (record.data?.patch) patchText.value = JSON.stringify(record.data.patch, null, 2);
     if (record.data?.draftDiagnostics) diagnosticsText.textContent = formatDraftDiagnostics(record.data.draftDiagnostics);
     showTab(record.data?.patch ? "patch" : "diagnostics");
+    return;
+  }
+  if (step === "experienceSummary" && record.data?.experienceSummary) {
+    latestExperienceSummary = record.data.experienceSummary;
+    experienceSummaryText.value = latestExperienceSummary.review_text || experienceSummaryText.value;
+    renderExperienceConflicts(latestExperienceSummary);
+    resultText.textContent = JSON.stringify(record.data.experienceSummary, null, 2);
+    openExperienceDialog();
+    showTab("result");
     return;
   }
   if ((step === "applyPreview" || step === "applyOverwrite") && record.data) {
@@ -796,7 +814,9 @@ function formatTime(value) {
 function openExperienceDialog() {
   experienceDialog.hidden = false;
   experienceSearchInput.value = "";
+  renderExperienceConflicts();
   loadSavedExperiences().catch((error) => setStatus(`加载历史经验失败：${error.message}`, "error"));
+  if (!experienceText.value.trim()) experienceText.focus();
 }
 
 function closeExperienceDialog() {
@@ -1136,6 +1156,37 @@ function compactExperienceSummary(data) {
   return data.artifact?.experienceSummary || data.experience_summary || null;
 }
 
+function experienceConflicts(summary = latestExperienceSummary) {
+  return Array.isArray(summary?.conflicts) ? summary.conflicts : [];
+}
+
+function renderExperienceConflicts(summary = latestExperienceSummary) {
+  const conflicts = experienceConflicts(summary);
+  if (!experienceConflictPanel || !experienceConflictText) return;
+  if (!conflicts.length) {
+    experienceConflictPanel.hidden = true;
+    experienceConflictText.textContent = "";
+    return;
+  }
+  experienceConflictPanel.hidden = false;
+  experienceConflictText.textContent = conflicts
+    .map((item, index) => {
+      const lines = [];
+      lines.push(`${index + 1}. ${item.severity || "medium"} · ${item.conflict_type || "经验冲突"}`);
+      if (item.existing_title || item.existing_experience_id) {
+        lines.push(`   历史经验：${item.existing_title || item.existing_experience_id}`);
+      }
+      if (item.reason) lines.push(`   问题：${item.reason}`);
+      if (item.new_value || item.existing_value) {
+        lines.push(`   新经验：${item.new_value || "未说明"}`);
+        lines.push(`   旧经验：${item.existing_value || "未说明"}`);
+      }
+      if (item.recommendation) lines.push(`   建议：${item.recommendation}`);
+      return lines.join("\n");
+    })
+    .join("\n\n");
+}
+
 function renderExperienceSummary(data) {
   const summary = compactExperienceSummary(data);
   if (!summary) return null;
@@ -1143,12 +1194,15 @@ function renderExperienceSummary(data) {
   experienceSummaryText.value = summary.review_text || "";
   saveRememberedInputs();
   saveExperienceBtn.disabled = !experienceSummaryText.value.trim();
+  renderExperienceConflicts(summary);
   resultText.textContent = JSON.stringify(
     {
       mode: summary.mode,
       summary_title: summary.summary_title,
       questions: summary.questions || [],
       risk_notes: summary.risk_notes || [],
+      conflicts: summary.conflicts || [],
+      conflict_source: summary.conflict_source || null,
       ai_error: summary.ai_error || null,
       records_preview: summary.records_preview || null
     },
@@ -1527,7 +1581,6 @@ document.querySelector("#relationsBtn").addEventListener("click", (event) => run
 }));
 
 document.querySelector("#teachBtn").addEventListener("click", (event) => runAction(event, async (label) => {
-  ensureActiveProject();
   const text = experienceText.value.trim();
   if (!text) throw new Error("请先写入一条配表经验");
   const payload = await buildPayload();
@@ -1541,9 +1594,16 @@ document.querySelector("#teachBtn").addEventListener("click", (event) => runActi
 }));
 
 saveExperienceBtn.addEventListener("click", (event) => runAction(event, async (label) => {
-  ensureActiveProject();
   const text = experienceSummaryText.value.trim();
   if (!text) throw new Error("请先整理经验，或在整理结果中填写要保存的内容");
+  const conflicts = experienceConflicts();
+  if (conflicts.length) {
+    const confirmed = window.confirm(`AI 检测到 ${conflicts.length} 条可能冲突。\n建议先查看“检测到可能冲突”区域，确认仍要录入这条经验吗？`);
+    if (!confirmed) {
+      setStatus("已取消保存冲突经验", "ok");
+      return;
+    }
+  }
   const payload = await buildPayload();
   payload.experience_text = text;
   const data = await callApi("/api/teach", payload, { label });

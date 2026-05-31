@@ -344,8 +344,11 @@ def call_experience_summary_ai(manifest: Manifest, summary_context: dict[str, An
                     "你是游戏数值策划的配表经验整理助手。只返回一个严格 JSON 对象，不要 Markdown。"
                     "目标是把用户随手写的经验整理成保存前可审核的知识。"
                     "JSON 必须包含：summary_title, review_text, activity_templates, field_mappings, "
-                    "personal_rules, questions, risk_notes。"
+                    "personal_rules, questions, risk_notes, conflicts。"
                     "review_text 用中文输出，适合用户直接编辑后保存；字段映射请尽量写成 `规划列名 -> table.field`。"
+                    "如果上下文里有 existing_experiences，请逐条比较新经验和历史经验，只报告有证据的冲突。"
+                    "conflicts 是数组，每项包含 conflict_type, severity, existing_experience_id, existing_title, "
+                    "reason, new_value, existing_value, recommendation；没有冲突时返回空数组。"
                     "不要编造没有证据的配置值；不确定的内容放到 questions。"
                 ),
             },

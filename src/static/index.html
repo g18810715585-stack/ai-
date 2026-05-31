@@ -62,21 +62,12 @@
           <div id="projectStepStatus" class="step-status">当前项目还没有运行记录。</div>
         </section>
 
-        <section class="experience-entry">
-          <label>
-            经验录入
-            <textarea id="experienceText" spellcheck="false" placeholder="例如：兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key。规划里商品名通常对应 goods 道具名，价格列对应 exchange 支付价格。"></textarea>
-          </label>
-          <div class="experience-actions">
-            <button id="teachBtn" type="button">AI 整理经验</button>
-            <button id="saveExperienceBtn" type="button" disabled>保存整理结果</button>
-            <button id="openExperienceDialog" type="button">查看历史经验</button>
-            <button id="activityPlanBtn" type="button">识别活动模板</button>
+        <section class="experience-launch">
+          <div>
+            <div class="field-title">经验功能</div>
+            <p>录入经验、AI 整理、保存经验和管理历史经验都在这里。</p>
           </div>
-          <label class="experience-summary">
-            整理结果
-            <textarea id="experienceSummaryText" spellcheck="false" placeholder="AI 整理后会显示在这里，你可以修改后再保存。"></textarea>
-          </label>
+          <button id="openExperienceDialog" type="button">打开经验功能</button>
         </section>
 
         <textarea id="manifestText" class="internal-manifest" spellcheck="false" aria-hidden="true" hidden></textarea>
@@ -104,6 +95,7 @@
           <button id="schemaScanBtn" type="button">扫描配置目录</button>
           <button id="relationsBtn" type="button">分析关联关系</button>
           <button id="analyzeBtn" type="button">分析表格</button>
+          <button id="activityPlanBtn" type="button">识别活动模板</button>
           <button id="draftBtn" type="button">生成草案</button>
           <button id="applyBtn" type="button">生成预览</button>
           <button id="overwriteBtn" class="danger-button" type="button">覆盖原表</button>
@@ -203,11 +195,30 @@
       <section class="dialog-panel experience-panel" role="dialog" aria-modal="true" aria-labelledby="experienceDialogTitle">
         <header class="dialog-header">
           <div>
-            <h2 id="experienceDialogTitle">历史经验</h2>
-            <p>查看已经保存的配表经验，支持修改内容或删除不再适用的经验。</p>
+            <h2 id="experienceDialogTitle">经验功能</h2>
+            <p>录入经验、让 AI 整理后再保存，也可以查看、修改或删除历史经验。</p>
           </div>
           <button id="closeExperienceDialog" class="icon-button" type="button" aria-label="关闭">×</button>
         </header>
+
+        <section class="experience-entry experience-create">
+          <label>
+            新增经验
+            <textarea id="experienceText" spellcheck="false" placeholder="例如：兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key。规划里商品名通常对应 goods 道具名，价格列对应 exchange 支付价格。"></textarea>
+          </label>
+          <div class="experience-actions">
+            <button id="teachBtn" type="button">AI 整理经验</button>
+            <button id="saveExperienceBtn" type="button" disabled>保存经验</button>
+          </div>
+          <label class="experience-summary">
+            整理结果
+            <textarea id="experienceSummaryText" spellcheck="false" placeholder="AI 整理后会显示在这里，你可以修改后再保存。"></textarea>
+          </label>
+          <div id="experienceConflictPanel" class="experience-conflict" hidden>
+            <strong>检测到可能冲突</strong>
+            <pre id="experienceConflictText"></pre>
+          </div>
+        </section>
 
         <div class="dialog-tools">
           <input id="experienceSearch" placeholder="搜索标题、内容、来源或项目" />

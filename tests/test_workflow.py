@@ -309,11 +309,32 @@ class WorkflowTests(unittest.TestCase):
                 "personal_rules": [],
                 "questions": [],
                 "risk_notes": ["保存前确认目标字段"],
+                "conflicts": [],
             },
         )
         self.assertEqual(merged["mode"], "ai")
         self.assertIn("goods.name", merged["review_text"])
         self.assertTrue(merged["records_preview"]["field_mappings"])
+        self.assertFalse(merged["has_conflicts"])
+
+    def test_experience_summary_detects_mapping_conflicts(self) -> None:
+        local = summarize_experience_locally(
+            "lesson-sample",
+            "兑换商店里商品名 -> reward.id",
+            existing_experiences=[
+                {
+                    "experience_id": "exp_old",
+                    "title": "旧商品映射",
+                    "project": "lesson-sample",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "text": "兑换商店里商品名 -> goods.name",
+                }
+            ],
+        )
+
+        self.assertTrue(local["has_conflicts"])
+        self.assertEqual(local["conflicts"][0]["conflict_type"], "field_mapping")
+        self.assertEqual(local["conflicts"][0]["existing_experience_id"], "exp_old")
 
     def test_experience_summary_ai_uses_review_json_shape(self) -> None:
         manifest = Manifest.model_validate(
@@ -338,6 +359,7 @@ class WorkflowTests(unittest.TestCase):
                                 "personal_rules": [],
                                 "questions": [],
                                 "risk_notes": [],
+                                "conflicts": [],
                             }
                         )
                     }
@@ -369,6 +391,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(captured["url"], "https://baseai.rivergame.net/v1/chat/completions")
         self.assertEqual(captured["body"]["response_format"], {"type": "json_object"})
         self.assertIn("review_text", captured["body"]["messages"][0]["content"])
+        self.assertIn("conflicts", captured["body"]["messages"][0]["content"])
 
     def test_activity_template_matching_builds_config_plan(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

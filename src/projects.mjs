@@ -286,6 +286,14 @@ function stepSummary(step, artifact = {}, parsed = {}) {
       patch_id: artifact.caseReview?.patch_id || ""
     };
   }
+  if (step === "experienceSummary") {
+    return {
+      summary_title: artifact.experienceSummary?.summary_title || parsed.summary_title || "",
+      mode: artifact.experienceSummary?.mode || parsed.mode || "",
+      conflict_count: artifact.experienceSummary?.conflicts?.length || parsed.conflict_count || 0,
+      has_conflicts: Boolean(artifact.experienceSummary?.has_conflicts || parsed.has_conflicts)
+    };
+  }
   return { run_dir: parsed.run_dir || "" };
 }
 
@@ -323,6 +331,9 @@ function stepData(step, artifact = {}, parsed = {}) {
   }
   if (step === "caseReview") {
     return { caseReview: artifact.caseReview || parsed };
+  }
+  if (step === "experienceSummary") {
+    return { experienceSummary: artifact.experienceSummary || null };
   }
   return { parsed };
 }

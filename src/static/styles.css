@@ -220,7 +220,8 @@ button:disabled {
   font-size: 13px;
 }
 
-.target-picker {
+.target-picker,
+.experience-launch {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
@@ -229,6 +230,13 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfcfd;
+}
+
+.experience-launch p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .project-memory {
@@ -292,7 +300,7 @@ button:disabled {
 
 .experience-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -311,7 +319,36 @@ button:disabled {
 }
 
 .experience-panel {
-  grid-template-rows: auto auto minmax(260px, 1fr);
+  grid-template-rows: auto auto auto minmax(260px, 1fr);
+  width: min(1120px, 100%);
+}
+
+.experience-create {
+  margin: 12px 16px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.experience-conflict {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #e1c99e;
+  border-radius: 6px;
+  padding: 10px;
+  background: #fff7e6;
+  color: var(--accent-2);
+}
+
+.experience-conflict[hidden] {
+  display: none;
+}
+
+.experience-conflict pre {
+  height: auto;
+  max-height: 180px;
+  color: var(--ink);
+  font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+  font-size: 12px;
 }
 
 .experience-history {
@@ -851,6 +888,7 @@ pre {
   }
 
   .target-picker,
+  .experience-launch,
   .common-editor,
   .experience-actions,
   .experience-history {

@@ -232,7 +232,20 @@ def cmd_experience_summary(args: argparse.Namespace) -> int:
         manifest_path = base_dir / manifest_path
     manifest = _load_manifest(manifest_path)
     run_dir = make_run_dir(_run_root(base_dir, manifest), "experience-summary")
-    local_summary = summarize_experience_locally(manifest.project, args.text)
+    saved = list_saved_experiences(base_dir).get("experiences", [])
+    existing_experiences = [
+        {
+            "experience_id": item.get("experience_id"),
+            "title": item.get("title"),
+            "project": item.get("project"),
+            "source": item.get("source"),
+            "created_at": item.get("created_at"),
+            "updated_at": item.get("updated_at"),
+            "text": str(item.get("text") or "")[:1200],
+        }
+        for item in saved[:80]
+    ]
+    local_summary = summarize_experience_locally(manifest.project, args.text, existing_experiences=existing_experiences)
     ai_summary = None
     ai_error = None
     if not args.no_ai:
@@ -250,8 +263,10 @@ def cmd_experience_summary(args: argparse.Namespace) -> int:
                     "raw_experience": args.text,
                     "target_tables": manifest.target_tables,
                     "schema_tables": schema_tables,
+                    "existing_experiences": existing_experiences,
                     "local_parse": local_summary.get("records_preview", {}),
-                    "instruction": "整理成用户确认后可保存的配表经验，不要生成 patch，不要写表。",
+                    "local_conflicts": local_summary.get("conflicts", []),
+                    "instruction": "整理成用户确认后可保存的配表经验，并检查和 existing_experiences 是否冲突；不要生成 patch，不要写表。",
                 },
                 run_dir / "experience-summary-ai-response.json",
             )
@@ -267,6 +282,8 @@ def cmd_experience_summary(args: argparse.Namespace) -> int:
                 "mode": summary["mode"],
                 "summary_title": summary["summary_title"],
                 "question_count": len(summary.get("questions", [])),
+                "conflict_count": len(summary.get("conflicts", [])),
+                "has_conflicts": bool(summary.get("conflicts", [])),
                 "ai_error": summary.get("ai_error"),
             },
             ensure_ascii=False,
