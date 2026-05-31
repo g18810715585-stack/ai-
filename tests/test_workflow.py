@@ -13,12 +13,13 @@ from openpyxl.comments import Comment
 from openpyxl.styles import PatternFill
 
 from ai_meta_agent.cli import analyze_manifest
-from ai_meta_agent.draft import call_baseai, make_stub_patch
+from ai_meta_agent.draft import call_baseai, call_relationship_ai, make_stub_patch
 from ai_meta_agent.feishu import FeishuSourcePayload
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
 from ai_meta_agent.io_utils import read_json, write_json
 from ai_meta_agent.models import Manifest, PlanningSource
 from ai_meta_agent.patch_engine import apply_patch
+from ai_meta_agent.relation_scanner import scan_relationships, split_reference_values
 from ai_meta_agent.schema import load_schema
 from ai_meta_agent.schema_scanner import scan_config_schema
 from ai_meta_agent.workbook_ir import load_source_ir
@@ -66,6 +67,36 @@ def make_config(path: Path) -> None:
     reward = workbook.create_sheet("reward_item_config")
     reward.append(["reward_group_id", "item_id", "item_count", "item_order"])
     reward.append([1001, 3001, 10, 1])
+    workbook.save(path)
+
+
+def make_relation_config(path: Path) -> None:
+    workbook = Workbook()
+    activity = workbook.active
+    activity.title = "activity"
+    activity.append(["id", "form_list", "name_key"])
+    activity.append([1, "100|101", "activity_title_1"])
+    activity.append([2, "102", "activity_title_2"])
+
+    shop = workbook.create_sheet("active_shop")
+    shop.append(["id", "group", "goods", "title_key"])
+    shop.append([10, 100, 500, "shop_title_1"])
+    shop.append([11, 101, 501, "shop_title_2"])
+    shop.append([12, 102, 502, "shop_title_3"])
+
+    reward = workbook.create_sheet("reward")
+    reward.append(["id", "type", "num"])
+    reward.append([500, 1, 10])
+    reward.append([501, 1, 20])
+    reward.append([502, 1, 30])
+
+    key = workbook.create_sheet("key")
+    key.append(["key", "text"])
+    key.append(["activity_title_1", "Activity 1"])
+    key.append(["activity_title_2", "Activity 2"])
+    key.append(["shop_title_1", "Shop 1"])
+    key.append(["shop_title_2", "Shop 2"])
+    key.append(["shop_title_3", "Shop 3"])
     workbook.save(path)
 
 
@@ -245,6 +276,47 @@ class WorkflowTests(unittest.TestCase):
             saved_report = read_json(run_dir / "schema-scan.json")
             self.assertEqual(saved_report["tables"]["shop_pack_config"]["sample_rows"][0]["start_time"], "2026-06-01T05:00:00")
 
+    def test_relation_scan_discovers_id_group_reward_and_key_links(self) -> None:
+        self.assertEqual(split_reference_values("[100, 101]"), ["100", "101"])
+        self.assertEqual(split_reference_values("100|101,102"), ["100", "101", "102"])
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            config_dir = tmp / "configs"
+            config_dir.mkdir()
+            config = config_dir / "relations.xlsx"
+            make_relation_config(config)
+            manifest = Manifest.model_validate(
+                {
+                    "project": "relation-sample",
+                    "mode": "supervised_write",
+                    "schema_path": str(tmp / ".runs" / "schema-scan" / "schema-draft.json"),
+                    "run_root": str(tmp / ".runs"),
+                    "planning_sources": [{"id": "dummy", "kind": "local_excel", "path": str(config), "role": "planning"}],
+                    "config_roots": [{"path": str(config_dir), "recursive": True}],
+                    "target_tables": ["activity"],
+                    "habit_store": str(tmp / ".knowledge" / "habits.jsonl"),
+                }
+            )
+            scan_dir = tmp / ".runs" / "schema-scan"
+            scan_dir.mkdir(parents=True)
+            scan_config_schema(manifest, tmp, scan_dir)
+            schema = load_schema(scan_dir / "schema-draft.json")
+
+            relation_dir = tmp / ".runs" / "relation-scan"
+            relation_dir.mkdir(parents=True)
+            result = scan_relationships(manifest, schema, tmp, relation_dir, scan_dir / "schema-scan.json")
+            relation_keys = {
+                (item["from_table"], item["from_field"], item["to_table"], item["to_field"])
+                for item in result["relations"]
+            }
+
+            self.assertIn(("activity", "form_list", "active_shop", "group"), relation_keys)
+            self.assertIn(("active_shop", "goods", "reward", "id"), relation_keys)
+            self.assertIn(("active_shop", "title_key", "key", "key"), relation_keys)
+            self.assertIn("active_shop", result["recommended_tables"])
+            self.assertIn("reward", result["recommended_tables"])
+            self.assertTrue((relation_dir / "relationship-map.json").exists())
+
     def test_feishu_sheet_source_becomes_workbook_ir(self) -> None:
         source = PlanningSource(id="plan", kind="feishu", url="https://rivergame.feishu.cn/wiki/demo?sheet=abc", role="planning")
         payload = FeishuSourcePayload(kind="sheet", title="飞书规划表", values=[["礼包ID", "礼包名称"], [1001, "每日礼包"]])
@@ -400,6 +472,68 @@ class WorkflowTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(RuntimeError, "BASEAI_API_KEY"):
                 call_baseai(manifest, {})
+
+    def test_relationship_ai_explainer_uses_compact_relation_context(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "relation-ai-sample",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx", "role": "planning"}],
+                "ai": {"provider": "deepseek_v4_pro"},
+            }
+        )
+        response_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "summary": "activity links to active_shop",
+                                "recommended_tables": ["active_shop"],
+                                "relation_notes": [],
+                                "needs_confirmation": [],
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(response_payload).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        with patch.dict(os.environ, {"BASEAI_API_KEY": "unit-key"}, clear=True):
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                review = call_relationship_ai(
+                    manifest,
+                    {
+                        "relations": [
+                            {
+                                "from_table": "activity",
+                                "from_field": "form_list",
+                                "to_table": "active_shop",
+                                "to_field": "group",
+                            }
+                        ]
+                    },
+                )
+        self.assertEqual(review["recommended_tables"], ["active_shop"])
+        self.assertEqual(captured["url"], "https://baseai.rivergame.net/v1/chat/completions")
+        self.assertEqual(captured["body"]["response_format"], {"type": "json_object"})
 
 
 if __name__ == "__main__":

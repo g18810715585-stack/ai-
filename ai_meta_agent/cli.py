@@ -8,11 +8,12 @@ from typing import Any
 
 from .ai_context import build_minimal_context, summarize_analysis
 from .config_discovery import discover_config_tables
-from .draft import call_baseai, make_stub_patch
+from .draft import call_baseai, call_relationship_ai, make_stub_patch
 from .habits import append_habit, habit_from_patch, load_habits, match_habits
 from .io_utils import make_run_dir, read_json, write_json, write_text
 from .models import Manifest, Patch
 from .patch_engine import apply_patch
+from .relation_scanner import compact_relationship_context, scan_relationships
 from .schema import load_schema
 from .schema_scanner import scan_config_schema
 from .workbook_ir import load_source_ir
@@ -37,6 +38,24 @@ def _schema_path(base_dir: Path, manifest: Manifest) -> Path:
     return path
 
 
+def _schema_scan_report_path(base_dir: Path, manifest: Manifest) -> Path | None:
+    schema_path = _schema_path(base_dir, manifest)
+    sibling = schema_path.with_name("schema-scan.json")
+    if sibling.exists():
+        return sibling
+    run_root = Path(manifest.run_root)
+    if not run_root.is_absolute():
+        run_root = base_dir / run_root
+    pointer = run_root / "LATEST_SCHEMA_SCAN.txt"
+    if pointer.exists():
+        value = pointer.read_text(encoding="utf-8").strip()
+        if value:
+            candidate = Path(value) / "schema-scan.json"
+            if candidate.exists():
+                return candidate
+    return None
+
+
 def _habit_path(base_dir: Path, manifest: Manifest) -> Path:
     path = Path(manifest.habit_store)
     if not path.is_absolute():
@@ -58,10 +77,11 @@ def _targeted_schema(schema: Any, manifest: Manifest) -> Any:
 
 def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis") -> tuple[Manifest, Any, Path, dict[str, Any]]:
     manifest = _load_manifest(manifest_path)
-    schema = load_schema(_schema_path(base_dir, manifest))
-    schema = _targeted_schema(schema, manifest)
+    full_schema = load_schema(_schema_path(base_dir, manifest))
+    schema = _targeted_schema(full_schema, manifest)
     manifest, config_discovery = discover_config_tables(manifest, schema, base_dir)
     run_dir = make_run_dir(_run_root(base_dir, manifest), label)
+    relationship_map = scan_relationships(manifest, full_schema, base_dir, run_dir, _schema_scan_report_path(base_dir, manifest))
     workbooks = []
     source_errors = []
     for source in manifest.planning_sources:
@@ -74,6 +94,7 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
     context = build_minimal_context(manifest, schema, workbooks, matched)
     context["source_errors"] = source_errors
     context["config_discovery"] = config_discovery
+    context["relationship_map"] = compact_relationship_context(relationship_map)
     analysis = {
         "run_dir": str(run_dir),
         "manifest": manifest.model_dump(mode="json"),
@@ -82,6 +103,7 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
         "schema": schema.model_dump(mode="json", exclude_none=True),
         "matched_habits": [habit.model_dump(mode="json", exclude_none=True) for habit in matched],
         "config_discovery": config_discovery,
+        "relationship_map": relationship_map,
     }
     write_json(run_dir / "analysis.json", analysis)
     write_json(run_dir / "ai-context.json", context)
@@ -119,6 +141,36 @@ def cmd_schema_scan(args: argparse.Namespace) -> int:
                 "table_count": result["report"]["table_count"],
                 "skipped_sheets": len(result["report"]["skipped_sheets"]),
                 "errors": len(result["report"]["errors"]),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def cmd_relations(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    manifest_path = Path(args.manifest)
+    if not manifest_path.is_absolute():
+        manifest_path = base_dir / manifest_path
+    manifest = _load_manifest(manifest_path)
+    schema = load_schema(_schema_path(base_dir, manifest))
+    run_dir = make_run_dir(_run_root(base_dir, manifest), "relation-scan")
+    result = scan_relationships(manifest, schema, base_dir, run_dir, _schema_scan_report_path(base_dir, manifest), max_rows=args.max_rows)
+    if args.explain:
+        ai_review = call_relationship_ai(manifest, compact_relationship_context(result), run_dir / "relationship-ai-response.json")
+        result["ai_review"] = {"mode": "ai", **ai_review}
+        write_json(run_dir / "relationship-map.json", result)
+    write_text(_run_root(base_dir, manifest) / "LATEST_RELATION_SCAN.txt", str(run_dir.resolve()))
+    print(
+        json.dumps(
+            {
+                "run_dir": str(run_dir),
+                "relationship_map": str(run_dir / "relationship-map.json"),
+                "relation_count": result["summary"]["relation_count"],
+                "recommended_tables": result["recommended_tables"],
+                "error_count": result["summary"]["error_count"],
             },
             ensure_ascii=False,
             indent=2,
@@ -253,6 +305,12 @@ def build_parser() -> argparse.ArgumentParser:
     schema_scan.add_argument("--manifest", required=True)
     schema_scan.add_argument("--sample-rows", type=int, default=5)
     schema_scan.set_defaults(func=cmd_schema_scan)
+
+    relations = sub.add_parser("relations")
+    relations.add_argument("--manifest", required=True)
+    relations.add_argument("--max-rows", type=int, default=1500)
+    relations.add_argument("--explain", action="store_true")
+    relations.set_defaults(func=cmd_relations)
 
     draft = sub.add_parser("draft")
     draft.add_argument("--manifest", required=True)

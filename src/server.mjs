@@ -358,6 +358,11 @@ function summarizeAnalysis(filePath) {
       error_count: (discovery.errors || []).length,
       errors: discovery.errors || []
     },
+    relationship_map: data.relationship_map ? {
+      relation_count: data.relationship_map.summary?.relation_count || 0,
+      recommended_tables: data.relationship_map.recommended_tables || [],
+      error_count: data.relationship_map.summary?.error_count || 0
+    } : null,
     matched_habit_count: (data.matched_habits || []).length
   };
 }
@@ -372,10 +377,12 @@ function collectArtifact(result) {
   const artifact = {};
   if (parsed.patch) artifact.patch = maybeReadJson(parsed.patch);
   if (parsed.result) artifact.result = maybeReadJson(parsed.result);
+  if (parsed.relationship_map) artifact.relationshipMap = maybeReadJson(parsed.relationship_map);
   if (parsed.schema_draft) artifact.schemaDraft = summarizeSchemaDraft(parsed.schema_draft);
   if (parsed.report) artifact.schemaScan = summarizeSchemaScan(parsed.report);
   if (parsed.run_dir) {
     artifact.analysis = summarizeAnalysis(path.join(parsed.run_dir, "analysis.json"));
+    artifact.relationshipMap = artifact.relationshipMap || maybeReadJson(path.join(parsed.run_dir, "relationship-map.json"));
     artifact.diff = maybeReadJson(path.join(parsed.run_dir, "diff.json"));
     artifact.validation = maybeReadJson(path.join(parsed.run_dir, "validation.json"));
     artifact.rollback = maybeReadJson(path.join(parsed.run_dir, "rollback-patch.json"));
@@ -424,6 +431,8 @@ async function handleApi(req, res, projectRoot) {
     args = ["analyze", "--manifest", manifestPath];
   } else if (url.pathname === "/api/schema-scan") {
     args = ["schema-scan", "--manifest", manifestPath];
+  } else if (url.pathname === "/api/relations") {
+    args = ["relations", "--manifest", manifestPath, ...(payload.explain ? ["--explain"] : [])];
   } else if (url.pathname === "/api/draft") {
     args = ["draft", "--manifest", manifestPath, ...(payload.stub === false ? [] : ["--stub"])];
   } else if (url.pathname === "/api/apply") {

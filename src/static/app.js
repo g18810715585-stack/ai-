@@ -1,5 +1,6 @@
 const manifestText = document.querySelector("#manifestText");
 const patchText = document.querySelector("#patchText");
+const relationsText = document.querySelector("#relationsText");
 const resultText = document.querySelector("#resultText");
 const rawText = document.querySelector("#rawText");
 const statusEl = document.querySelector("#status");
@@ -556,6 +557,31 @@ function compactSchemaResult(data) {
   };
 }
 
+function compactRelationshipMap(data) {
+  const map = data.artifact?.relationshipMap || data.relationship_map || {};
+  const relations = (map.relations || []).slice(0, 80).map((relation) => ({
+    from: `${relation.from_table}.${relation.from_field}`,
+    to: `${relation.to_table}.${relation.to_field}`,
+    to_field_kind: relation.to_field_kind,
+    type: relation.relation_type,
+    confidence: relation.confidence,
+    risk: relation.risk,
+    hop: relation.hop,
+    evidence: relation.evidence
+  }));
+  return {
+    summary: map.summary || parseStdout(data),
+    target_tables: map.target_tables || [],
+    recommended_tables: map.recommended_tables || [],
+    ai_review: map.ai_review || null,
+    relations,
+    diagnostics: {
+      missing_refs: (map.diagnostics?.missing_refs || []).slice(0, 40),
+      errors: map.diagnostics?.errors || []
+    }
+  };
+}
+
 function rememberSchemaPath(schemaPath) {
   if (!schemaPath) return;
   latestSchemaPath = schemaPath;
@@ -653,11 +679,27 @@ document.querySelector("#schemaScanBtn").addEventListener("click", () => runActi
   if (!selectedTargetTables.length) openTargetDialog();
 }));
 
+document.querySelector("#relationsBtn").addEventListener("click", () => runAction(async () => {
+  ensureTargetTablesSelected();
+  const payload = await buildPayload();
+  if (draftMode === "real") {
+    const aiStatus = latestAiStatus?.ready ? latestAiStatus : await loadAiStatus();
+    payload.explain = Boolean(aiStatus?.ready);
+  }
+  const data = await callApi("/api/relations", payload);
+  relationsText.textContent = JSON.stringify(compactRelationshipMap(data), null, 2);
+  resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
+  showTab("relations");
+}));
+
 document.querySelector("#analyzeBtn").addEventListener("click", () => runAction(async () => {
   ensureTargetTablesSelected();
   const payload = await buildPayload();
   ensurePlanningSource(payload.manifest);
   const data = await callApi("/api/analyze", payload);
+  if (data.artifact?.relationshipMap) {
+    relationsText.textContent = JSON.stringify(compactRelationshipMap(data), null, 2);
+  }
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   showTab("result");
 }));
@@ -677,6 +719,9 @@ document.querySelector("#draftBtn").addEventListener("click", () => runAction(as
   if (data.artifact?.patch) {
     lastPatch = data.artifact.patch;
     patchText.value = JSON.stringify(lastPatch, null, 2);
+  }
+  if (data.artifact?.relationshipMap) {
+    relationsText.textContent = JSON.stringify(compactRelationshipMap(data), null, 2);
   }
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   showTab("patch");

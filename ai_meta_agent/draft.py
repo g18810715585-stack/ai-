@@ -257,3 +257,58 @@ def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: 
         if raw_response_path:
             write_json(raw_response_path.with_name("ai-invalid-patch.json"), parsed)
         raise RuntimeError(f"真实 AI 返回的 patch 不符合 Schema：{exc}") from exc
+
+
+def call_relationship_ai(manifest: Manifest, relationship_context: dict[str, Any], raw_response_path: Path | None = None) -> dict[str, Any]:
+    runtime = _resolve_ai_runtime(manifest)
+    api_key = os.environ.get(runtime["api_key_env"])
+    if not api_key:
+        raise RuntimeError(f"缺少真实 AI Key：请在项目根目录 .env 里配置 {runtime['api_key_env']}=你的Key，或关闭 AI 解释。")
+    base_url = os.environ.get(runtime["base_url_env"], runtime["default_base_url"]).rstrip("/")
+    model = os.environ.get(runtime["model_env"], runtime["default_model"])
+    url = f"{base_url}/chat/completions"
+    body = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You explain game meta table relationships. Return only strict JSON with keys: "
+                    "summary, recommended_tables, relation_notes, needs_confirmation. "
+                    "Do not invent relations; only explain or rank relations present in the provided relationship map."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(relationship_context, ensure_ascii=False),
+            },
+        ],
+        "response_format": {"type": "json_object"},
+        **runtime["extra_body"],
+    }
+    if runtime["temperature"] is not None:
+        body["temperature"] = runtime["temperature"]
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        message = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"{runtime['label']} 关系解释请求失败：HTTP {exc.code} {message}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"{runtime['label']} 关系解释网络连接失败：{exc.reason}") from exc
+    if raw_response_path:
+        write_json(raw_response_path, {"provider": runtime["id"], "base_url": base_url, "model": model, "response": payload})
+    content = payload["choices"][0]["message"]["content"]
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError as exc:
+        if raw_response_path:
+            write_text(raw_response_path.with_name("relationship-ai-invalid-content.txt"), content)
+        raise RuntimeError(f"真实 AI 返回的关系解释不是合法 JSON：{exc}") from exc
+    return parsed

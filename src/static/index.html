@@ -66,6 +66,7 @@
 
         <div class="actions">
           <button id="schemaScanBtn" type="button">扫描配置目录</button>
+          <button id="relationsBtn" type="button">分析关联关系</button>
           <button id="analyzeBtn" type="button">分析表格</button>
           <button id="draftBtn" type="button">生成草案</button>
           <button id="applyBtn" type="button">生成预览</button>
@@ -76,12 +77,16 @@
       <section class="panel review-panel">
         <div class="tabs">
           <button class="tab active" data-tab="patch">变更 Patch</button>
+          <button class="tab" data-tab="relations">关联关系</button>
           <button class="tab" data-tab="result">执行结果</button>
           <button class="tab" data-tab="raw">原始响应</button>
         </div>
 
         <div id="patchTab" class="tab-content active">
           <textarea id="patchText" spellcheck="false"></textarea>
+        </div>
+        <div id="relationsTab" class="tab-content">
+          <pre id="relationsText"></pre>
         </div>
         <div id="resultTab" class="tab-content">
           <pre id="resultText"></pre>
