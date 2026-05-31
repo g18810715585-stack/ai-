@@ -1,5 +1,6 @@
 const manifestText = document.querySelector("#manifestText");
 const patchText = document.querySelector("#patchText");
+const diagnosticsText = document.querySelector("#diagnosticsText");
 const relationsText = document.querySelector("#relationsText");
 const resultText = document.querySelector("#resultText");
 const rawText = document.querySelector("#rawText");
@@ -614,6 +615,70 @@ function compactRelationshipMap(data) {
   };
 }
 
+function compactDraftDiagnostics(data) {
+  return data.artifact?.draftDiagnostics || null;
+}
+
+function formatDraftDiagnostics(diagnostics) {
+  if (!diagnostics) return "暂无草案诊断。";
+  const lines = [];
+  lines.push(diagnostics.status === "empty" ? "草案没有生成配置变更" : "草案诊断");
+  lines.push("");
+  if (diagnostics.summary) {
+    lines.push(diagnostics.summary);
+    lines.push("");
+  }
+  appendList(lines, "原因", diagnostics.reasons);
+  appendList(lines, "缺少的信息", diagnostics.missing_information);
+  appendList(lines, "建议勾选的关联表", diagnostics.suggested_target_tables);
+  appendFieldMappings(lines, diagnostics.suggested_field_mappings);
+  if (diagnostics.relationship_summary) {
+    lines.push("关联关系摘要");
+    lines.push(`- 关系数：${diagnostics.relationship_summary.relation_count || 0}`);
+    lines.push(`- 高置信关系：${diagnostics.relationship_summary.high_confidence_count || 0}`);
+    if (diagnostics.relationship_summary.recommended_tables?.length) {
+      lines.push(`- 推荐表：${diagnostics.relationship_summary.recommended_tables.join(", ")}`);
+    }
+    lines.push("");
+  }
+  appendList(lines, "下一步", diagnostics.next_steps);
+  if (diagnostics.ai_review && !diagnostics.ai_review.error) {
+    lines.push("AI 诊断");
+    lines.push(JSON.stringify(diagnostics.ai_review, null, 2));
+    lines.push("");
+  }
+  if (diagnostics.ai_review?.error) {
+    lines.push("AI 诊断未完成");
+    lines.push(`- ${diagnostics.ai_review.error}`);
+    lines.push("");
+  }
+  if (diagnostics.ai_reason) {
+    lines.push("AI 原始判断摘要");
+    lines.push(diagnostics.ai_reason);
+  }
+  return lines.join("\n");
+}
+
+function appendList(lines, title, values) {
+  if (!values?.length) return;
+  lines.push(title);
+  for (const value of values) {
+    lines.push(`- ${value}`);
+  }
+  lines.push("");
+}
+
+function appendFieldMappings(lines, mappings) {
+  if (!mappings?.length) return;
+  lines.push("建议优先补充的字段映射");
+  for (const mapping of mappings.slice(0, 12)) {
+    lines.push(`- ${mapping.target_table}`);
+    if (mapping.primary_key?.length) lines.push(`  主键：${mapping.primary_key.join(", ")}`);
+    if (mapping.fields_to_map_first?.length) lines.push(`  字段：${mapping.fields_to_map_first.join(", ")}`);
+  }
+  lines.push("");
+}
+
 function rememberSchemaPath(schemaPath) {
   if (!schemaPath) return;
   latestSchemaPath = schemaPath;
@@ -764,11 +829,21 @@ document.querySelector("#draftBtn").addEventListener("click", (event) => runActi
     lastPatch = data.artifact.patch;
     patchText.value = JSON.stringify(lastPatch, null, 2);
   }
+  const diagnostics = compactDraftDiagnostics(data);
+  if (diagnostics) {
+    diagnosticsText.textContent = formatDraftDiagnostics(diagnostics);
+  }
   if (data.artifact?.relationshipMap) {
     relationsText.textContent = JSON.stringify(compactRelationshipMap(data), null, 2);
   }
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
-  showTab("patch");
+  const operationCount = data.artifact?.patch?.operations?.length || 0;
+  if (operationCount === 0 && diagnostics) {
+    setStatus("生成草案完成：没有安全变更，已生成诊断", "ok");
+    showTab("diagnostics");
+  } else {
+    showTab("patch");
+  }
 }));
 
 document.querySelector("#applyBtn").addEventListener("click", (event) => runAction(event, async (label) => {

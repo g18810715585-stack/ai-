@@ -13,11 +13,12 @@ from openpyxl.comments import Comment
 from openpyxl.styles import PatternFill
 
 from ai_meta_agent.cli import analyze_manifest
-from ai_meta_agent.draft import call_baseai, call_relationship_ai, make_stub_patch
+from ai_meta_agent.draft import call_baseai, call_draft_diagnostics_ai, call_relationship_ai, make_stub_patch
+from ai_meta_agent.draft_diagnostics import build_draft_diagnostics, compact_draft_diagnostic_context
 from ai_meta_agent.feishu import FeishuSourcePayload
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
 from ai_meta_agent.io_utils import read_json, write_json
-from ai_meta_agent.models import Manifest, PlanningSource
+from ai_meta_agent.models import Manifest, Patch, PlanningSource
 from ai_meta_agent.patch_engine import apply_patch
 from ai_meta_agent.relation_scanner import scan_relationships, split_reference_values
 from ai_meta_agent.schema import load_schema
@@ -534,6 +535,106 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(review["recommended_tables"], ["active_shop"])
         self.assertEqual(captured["url"], "https://baseai.rivergame.net/v1/chat/completions")
         self.assertEqual(captured["body"]["response_format"], {"type": "json_object"})
+
+    def test_empty_draft_diagnostics_explains_missing_mapping(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "diagnostic-sample",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx", "role": "planning"}],
+            }
+        )
+        patch_obj = Patch(patch_id="empty", project="diagnostic-sample", operations=[])
+        context = {
+            "target_tables": ["activity", "reward"],
+            "workbooks": [
+                {
+                    "source_id": "plan",
+                    "source_type": "local_excel",
+                    "sheets": [
+                        {
+                            "name": "活动规划",
+                            "max_row": 10,
+                            "max_column": 4,
+                            "header_row": 1,
+                            "headers": ["道具名称", "数量", "价格"],
+                            "sample_rows": [{"道具名称": "金币", "数量": 10}],
+                        }
+                    ],
+                }
+            ],
+            "schema": {
+                "tables": {
+                    "activity": {"primary_key": ["id"], "fields": {"id": {}, "活动标题": {}, "form_list": {}}},
+                    "reward": {"primary_key": ["id"], "fields": {"id": {}, "奖励": {}, "数量": {}}},
+                }
+            },
+            "relationship_map": {
+                "summary": {"relation_count": 3, "high_confidence_count": 2},
+                "recommended_tables": ["goods"],
+            },
+        }
+        diagnostics = build_draft_diagnostics(manifest, context, patch_obj)
+        compact = compact_draft_diagnostic_context(manifest, context, patch_obj)
+
+        self.assertEqual(diagnostics["status"], "empty")
+        self.assertIn("goods", diagnostics["suggested_target_tables"])
+        self.assertTrue(diagnostics["missing_information"])
+        self.assertIn("activity", compact["schema_tables"])
+
+    def test_draft_diagnostics_ai_uses_compact_context(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "diagnostic-ai-sample",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx", "role": "planning"}],
+                "ai": {"provider": "deepseek_v4_pro"},
+            }
+        )
+        response_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "summary": "no safe field mapping",
+                                "reasons": ["headers do not map"],
+                                "missing_information": ["field mapping"],
+                                "suggested_target_tables": ["goods"],
+                                "suggested_field_mappings": [],
+                                "next_steps": ["add mapping"],
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(response_payload).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        with patch.dict(os.environ, {"BASEAI_API_KEY": "unit-key"}, clear=True):
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                review = call_draft_diagnostics_ai(manifest, {"patch": {"operation_count": 0}})
+
+        self.assertEqual(review["suggested_target_tables"], ["goods"])
+        self.assertEqual(captured["url"], "https://baseai.rivergame.net/v1/chat/completions")
+        self.assertIn("zero operations", captured["body"]["messages"][0]["content"])
 
 
 if __name__ == "__main__":

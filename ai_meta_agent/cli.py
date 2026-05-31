@@ -8,7 +8,12 @@ from typing import Any
 
 from .ai_context import build_minimal_context, summarize_analysis
 from .config_discovery import discover_config_tables
-from .draft import call_baseai, call_relationship_ai, make_stub_patch
+from .draft import call_baseai, call_draft_diagnostics_ai, call_relationship_ai, make_stub_patch
+from .draft_diagnostics import (
+    build_draft_diagnostics,
+    compact_draft_diagnostic_context,
+    extract_ai_reasoning,
+)
 from .habits import append_habit, habit_from_patch, load_habits, match_habits
 from .io_utils import make_run_dir, read_json, write_json, write_text
 from .models import Manifest, Patch
@@ -215,8 +220,39 @@ def cmd_draft(args: argparse.Namespace) -> int:
     Patch.model_validate(patch.model_dump())
     write_json(run_dir / "patch.json", patch.model_dump(mode="json", exclude_none=True))
     write_json(run_dir / "candidate-habits.json", _candidate_habits_from_patch(patch))
+    ai_review = None
+    ai_reason = extract_ai_reasoning(run_dir / "ai-response.json")
+    if not args.stub and not patch.operations:
+        try:
+            ai_review = call_draft_diagnostics_ai(
+                manifest,
+                compact_draft_diagnostic_context(manifest, context, patch),
+                run_dir / "draft-diagnostics-ai-response.json",
+            )
+        except Exception as exc:  # noqa: BLE001 - local diagnostics still explain the empty patch.
+            ai_review = {"error": str(exc)}
+    diagnostics = build_draft_diagnostics(
+        manifest,
+        context,
+        patch,
+        ai_reason=ai_reason,
+        ai_review=ai_review,
+    )
+    write_json(run_dir / "draft-diagnostics.json", diagnostics)
     write_text(run_dir / "patch.md", _patch_markdown(patch))
-    print(json.dumps({"run_dir": str(run_dir), "patch": str(run_dir / "patch.json"), "operations": len(patch.operations)}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "run_dir": str(run_dir),
+                "patch": str(run_dir / "patch.json"),
+                "draft_diagnostics": str(run_dir / "draft-diagnostics.json"),
+                "operations": len(patch.operations),
+                "diagnostic_status": diagnostics["status"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 

@@ -110,7 +110,8 @@ function runCore(projectRoot, args) {
   const result = spawnSync(python, ["-m", "ai_meta_agent.cli", "--base-dir", projectRoot, ...args], {
     cwd: projectRoot,
     env,
-    encoding: "utf8"
+    encoding: "utf8",
+    windowsHide: true
   });
   return {
     status: result.status ?? 1,
@@ -376,6 +377,7 @@ function collectArtifact(result) {
   }
   const artifact = {};
   if (parsed.patch) artifact.patch = maybeReadJson(parsed.patch);
+  if (parsed.draft_diagnostics) artifact.draftDiagnostics = maybeReadJson(parsed.draft_diagnostics);
   if (parsed.result) artifact.result = maybeReadJson(parsed.result);
   if (parsed.relationship_map) artifact.relationshipMap = maybeReadJson(parsed.relationship_map);
   if (parsed.schema_draft) artifact.schemaDraft = summarizeSchemaDraft(parsed.schema_draft);
@@ -383,6 +385,7 @@ function collectArtifact(result) {
   if (parsed.run_dir) {
     artifact.analysis = summarizeAnalysis(path.join(parsed.run_dir, "analysis.json"));
     artifact.relationshipMap = artifact.relationshipMap || maybeReadJson(path.join(parsed.run_dir, "relationship-map.json"));
+    artifact.draftDiagnostics = artifact.draftDiagnostics || maybeReadJson(path.join(parsed.run_dir, "draft-diagnostics.json"));
     artifact.diff = maybeReadJson(path.join(parsed.run_dir, "diff.json"));
     artifact.validation = maybeReadJson(path.join(parsed.run_dir, "validation.json"));
     artifact.rollback = maybeReadJson(path.join(parsed.run_dir, "rollback-patch.json"));

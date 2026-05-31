@@ -74,6 +74,7 @@
       <section class="panel review-panel">
         <div class="tabs">
           <button class="tab active" data-tab="patch">变更 Patch</button>
+          <button class="tab" data-tab="diagnostics">草案诊断</button>
           <button class="tab" data-tab="relations">关联关系</button>
           <button class="tab" data-tab="result">执行结果</button>
           <button class="tab" data-tab="raw">原始响应</button>
@@ -81,6 +82,9 @@
 
         <div id="patchTab" class="tab-content active">
           <textarea id="patchText" spellcheck="false"></textarea>
+        </div>
+        <div id="diagnosticsTab" class="tab-content">
+          <pre id="diagnosticsText"></pre>
         </div>
         <div id="relationsTab" class="tab-content">
           <pre id="relationsText"></pre>
