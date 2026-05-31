@@ -1,75 +1,672 @@
 {
-  "description": "默认常用配置表候选。已清空上一版从 Excel 扫描出的候选，改为从旧项目 meta-doc-excel 的本地学习表和活动模板配置中提取。只保存 sheet 名，不保存本机真实路径。",
+  "description": "Common config table candidates copied from tools/meta-doc-excel local learning data. Real workbook paths are intentionally omitted.",
   "source_project": "tools/meta-doc-excel",
   "source_files": [
-    ".knowledge/local-learning-tables.json",
-    "config/exchange-shop.default.json",
-    "config/battle-pass.default.json",
-    "fixtures/exchange-shop.test.config.json"
+    ".knowledge/local-learning-tables.json"
   ],
-  "selection_rule": "只保留旧项目中启用的本地学习表、模板 targets 中声明的 sheet、battle-pass focused_tables；去掉旧项目内部 key，只保留配置表 sheet 名。",
+  "selection_rule": "Only enabled entries with config-style sheet names are included. Sort order is core, high, medium, low, then name.",
+  "tier_order": [
+    "core",
+    "high",
+    "medium",
+    "low"
+  ],
   "tables": [
-    "active_shop",
-    "activity",
-    "activity_alliance_realm",
-    "activity_alliance_realm_map",
-    "activity_alliance_realm_stage",
-    "activity_click",
-    "activity_click_monster",
-    "activity_collect",
-    "activity_drop",
-    "activity_infinite_floor",
-    "activity_open_calendar",
-    "activity_point_mission",
-    "activity_search",
-    "activity_server_donate",
-    "activity_server_donate_reward",
-    "activity_show",
-    "activity_skating",
-    "activity_skating_map",
-    "activity_skating_map_list",
-    "activity_slots",
-    "activity_slots_item",
-    "activity_slots_reward",
-    "activity_task",
-    "activity_task_target",
-    "activity_theme",
-    "concert_lottery",
-    "concert_lottery_groupreward",
-    "debuff_server_group",
-    "exchange",
-    "exchange_groupbuying",
-    "exchange_payid",
-    "gashapon",
-    "goldbrick_payid",
-    "goods",
-    "interactive_goods",
-    "jump",
-    "key",
-    "key_server_msg",
-    "lucky_exchange_group",
-    "mail",
-    "pinball",
-    "pinball_map",
-    "pinball_map_rate",
-    "player_dress",
-    "reward",
-    "reward_continuous",
-    "reward_numerical_new",
-    "reward_rank",
-    "reward_season",
-    "reward_whitelist",
-    "rich_man",
-    "rich_man_bonus_map",
-    "rich_man_event",
-    "rich_man_map",
-    "settings",
-    "shop_goods",
-    "shop_tag_name",
-    "shop_type",
-    "special_money_shop",
-    "switch",
-    "turntable",
-    "world_skin_suit_collection"
+    {
+      "name": "active_shop",
+      "frequencyTier": "core",
+      "priority": 120,
+      "activityTags": [],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity",
+      "frequencyTier": "core",
+      "priority": 120,
+      "activityTags": [],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_point_mission",
+      "frequencyTier": "core",
+      "priority": 120,
+      "activityTags": [],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "exchange",
+      "frequencyTier": "core",
+      "priority": 120,
+      "activityTags": [],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "goods",
+      "frequencyTier": "core",
+      "priority": 120,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "reward",
+      "frequencyTier": "core",
+      "priority": 120,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_drop",
+      "frequencyTier": "high",
+      "priority": 90,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_show",
+      "frequencyTier": "high",
+      "priority": 90,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_task_target",
+      "frequencyTier": "high",
+      "priority": 90,
+      "activityTags": [],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "exchange_groupbuying",
+      "frequencyTier": "high",
+      "priority": 90,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "reward_rank",
+      "frequencyTier": "high",
+      "priority": 90,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_alliance_realm",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "skin"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_alliance_realm_map",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "skin"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_alliance_realm_stage",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "skin"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_click",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "skin"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_click_monster",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "skin"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "debuff_server_group",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "skin"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "jump",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "mail",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "pinball",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "turntable"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "pinball_map",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "turntable"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "pinball_map_rate",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "turntable"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "player_dress",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "rich_man",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "rich-man"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "rich_man_bonus_map",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "rich-man"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "rich_man_event",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "rich-man"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "rich_man_map",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "rich-man"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "settings",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "skin"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "special_money_shop",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "turntable",
+      "frequencyTier": "medium",
+      "priority": 60,
+      "activityTags": [
+        "turntable"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_collect",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "skin"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_infinite_floor",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_open_calendar",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_search",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_server_donate",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_server_donate_reward",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_skating",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_skating_map",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_skating_map_list",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_slots",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_slots_item",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_slots_reward",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_task",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "turntable"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "activity_theme",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "concert_lottery",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "turntable"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "concert_lottery_groupreward",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "turntable"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "exchange_payid",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "gashapon",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "turntable"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "goldbrick_payid",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "interactive_goods",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "key_server_msg",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "common"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "lucky_exchange_group",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "reward_continuous",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "reward_numerical_new",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "reward_season",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "reward_whitelist",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "shop_goods",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "shop_tag_name",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "shop_type",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "exchange-shop"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "switch",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "skin"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    },
+    {
+      "name": "world_skin_suit_collection",
+      "frequencyTier": "low",
+      "priority": 30,
+      "activityTags": [
+        "citybuilding",
+        "skin"
+      ],
+      "sources": [
+        "old-project .knowledge/local-learning-tables.json"
+      ]
+    }
   ]
 }

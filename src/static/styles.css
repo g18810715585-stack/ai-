@@ -201,6 +201,30 @@ button:hover {
   font-size: 11px;
 }
 
+.badge.tier-core {
+  border-color: #9fc9b9;
+  background: #edf8f3;
+  color: #146c5f;
+}
+
+.badge.tier-high {
+  border-color: #efb2a8;
+  background: #fff1ee;
+  color: #b42318;
+}
+
+.badge.tier-medium {
+  border-color: #c8d3e4;
+  background: #f1f5fb;
+  color: #3563e9;
+}
+
+.badge.tier-low {
+  border-color: #d3d9df;
+  background: #f6f8fa;
+  color: #667085;
+}
+
 .mode-row {
   display: grid;
   grid-template-columns: 1fr;

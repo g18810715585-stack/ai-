@@ -12,10 +12,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  $html=(Invoke-WebRequest -UseBasicParsing -Uri $base -TimeoutSec 2).Content;" ^
   "  $appResp=Invoke-WebRequest -UseBasicParsing -Uri ($base + '/app.js') -TimeoutSec 2;" ^
   "  $app=$appResp.Content;" ^
-  "  $appReady = $app.Contains('serverCommonTables') -and $app.Contains('tablePresetVersion');" ^
+  "  $appReady = $app.Contains('serverCommonTables') -and $app.Contains('tablePresetVersion') -and $app.Contains('tableTierLabels');" ^
   "  $invalidCount = @($tables.tables | Where-Object { $_.name -notmatch '^[A-Za-z][A-Za-z0-9_]*$' }).Count;" ^
-  "  $ok = $health.ok -and (($tables.table_count -as [int]) -gt 0) -and ($invalidCount -eq 0) -and $html.Contains('targetDialog') -and $appReady;" ^
-  "  [pscustomobject]@{ reachable=$true; ok=$ok; pid=$health.pid; tableCount=$tables.table_count; commonCount=$tables.common_tables.Count; invalidNameCount=$invalidCount; htmlReady=$html.Contains('targetDialog'); appReady=$appReady; cacheControl=$appResp.Headers['Cache-Control'] } | ConvertTo-Json -Compress | Write-Host;" ^
+  "  $firstCommon = @($tables.tables | Where-Object { $_.is_common } | Select-Object -First 1)[0];" ^
+  "  $tierOrderOk = $firstCommon -and ($firstCommon.frequency_tier -eq 'core');" ^
+  "  $ok = $health.ok -and (($tables.table_count -as [int]) -gt 0) -and ($invalidCount -eq 0) -and $html.Contains('targetDialog') -and $appReady -and $tierOrderOk;" ^
+  "  [pscustomobject]@{ reachable=$true; ok=$ok; pid=$health.pid; tableCount=$tables.table_count; commonCount=$tables.common_tables.Count; invalidNameCount=$invalidCount; firstCommon=$firstCommon.name; firstTier=$firstCommon.frequency_tier; tierOrderOk=$tierOrderOk; htmlReady=$html.Contains('targetDialog'); appReady=$appReady; cacheControl=$appResp.Headers['Cache-Control'] } | ConvertTo-Json -Compress | Write-Host;" ^
   "  if ($ok) { exit 0 } else { exit 1 }" ^
   "} catch {" ^
   "  [pscustomobject]@{ reachable=$false; ok=$false; error=$_.Exception.Message } | ConvertTo-Json -Compress | Write-Host;" ^

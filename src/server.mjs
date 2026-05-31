@@ -174,7 +174,33 @@ function countBy(items, field) {
   return counts;
 }
 
-function loadCommonTables(projectRoot) {
+const TABLE_TIER_RANK = {
+  core: 0,
+  high: 1,
+  medium: 2,
+  low: 3
+};
+
+function tableTierRank(tier) {
+  return TABLE_TIER_RANK[String(tier || "").toLowerCase()] ?? 99;
+}
+
+function normalizeCommonTableEntry(item) {
+  if (typeof item === "string") {
+    return { name: item.trim(), frequencyTier: null, priority: 0, activityTags: [] };
+  }
+  const name = String(item?.name || item?.sheet || item?.key || "").trim();
+  const frequencyTier = String(item?.frequencyTier || item?.frequency_tier || "").trim().toLowerCase() || null;
+  const priority = Number.isFinite(Number(item?.priority)) ? Number(item.priority) : 0;
+  const activityTags = Array.isArray(item?.activityTags)
+    ? item.activityTags.map((tag) => String(tag)).filter(Boolean)
+    : Array.isArray(item?.activity_tags)
+      ? item.activity_tags.map((tag) => String(tag)).filter(Boolean)
+      : [];
+  return { name, frequencyTier, priority, activityTags };
+}
+
+function loadCommonTableEntries(projectRoot) {
   const candidates = [
     path.join(projectRoot, ".knowledge", "common-tables.json"),
     path.join(projectRoot, "config", "common-tables.json")
@@ -182,8 +208,17 @@ function loadCommonTables(projectRoot) {
   for (const filePath of candidates) {
     const data = maybeReadJson(filePath);
     if (!data) continue;
-    if (Array.isArray(data)) return data.map((name) => String(name)).filter(Boolean);
-    if (Array.isArray(data.tables)) return data.tables.map((item) => String(item?.name || item)).filter(Boolean);
+    const rawTables = Array.isArray(data) ? data : data.tables;
+    if (Array.isArray(rawTables)) {
+      return rawTables
+        .map(normalizeCommonTableEntry)
+        .filter((item) => isConfigTableName(item.name))
+        .sort((left, right) =>
+          tableTierRank(left.frequencyTier) - tableTierRank(right.frequencyTier) ||
+          right.priority - left.priority ||
+          left.name.localeCompare(right.name)
+        );
+    }
   }
   return [];
 }
@@ -197,8 +232,10 @@ function tableOptions(projectRoot) {
   const scanPath = latestSchemaScan(projectRoot);
   const schema = maybeReadJson(schemaPath);
   const scan = maybeReadJson(scanPath);
-  const commonTables = loadCommonTables(projectRoot);
+  const commonEntries = loadCommonTableEntries(projectRoot);
+  const commonTables = commonEntries.map((item) => item.name);
   const commonSet = new Set(commonTables);
+  const commonByName = new Map(commonEntries.map((item) => [item.name, item]));
   const sourceByName = new Map();
   for (const [name, table] of Object.entries(scan?.tables || {})) {
     sourceByName.set(name, table);
@@ -206,28 +243,39 @@ function tableOptions(projectRoot) {
   const names = new Set([
     ...Object.keys(schema?.tables || {}),
     ...Object.keys(scan?.tables || {}),
-    ...loadCommonTables(projectRoot)
+    ...commonTables
   ]);
-  const tables = [...names].filter(isConfigTableName).sort((left, right) => left.localeCompare(right)).map((name) => {
+  const tables = [...names].filter(isConfigTableName).map((name) => {
     const schemaTable = schema?.tables?.[name] || {};
     const scanTable = sourceByName.get(name) || {};
     const fields = schemaTable.fields || scanTable.fields || {};
     const isCommon = commonSet.has(name);
+    const commonEntry = commonByName.get(name);
     return {
       name,
       sheet: schemaTable.sheet || scanTable.sheet || name,
       source_file: scanTable.source_file || null,
       source: scanTable.source_file ? null : isCommon ? "常用表" : null,
       is_common: isCommon,
+      frequency_tier: commonEntry?.frequencyTier || null,
+      priority: commonEntry?.priority || 0,
+      tier_rank: tableTierRank(commonEntry?.frequencyTier),
+      activity_tags: commonEntry?.activityTags || [],
       primary_key: schemaTable.primary_key || scanTable.primary_key || [],
       field_count: Object.keys(fields).length
     };
-  });
+  }).sort((left, right) =>
+    left.tier_rank - right.tier_rank ||
+    Number(!left.is_common) - Number(!right.is_common) ||
+    right.priority - left.priority ||
+    left.name.localeCompare(right.name)
+  );
   return {
     schema_path: schemaPath,
     scan_path: scanPath,
     table_count: tables.length,
     common_tables: commonTables.filter(isConfigTableName),
+    common_table_details: commonEntries,
     tables
   };
 }

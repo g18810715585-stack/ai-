@@ -41,11 +41,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$html=(Invoke-WebRequest -UseBasicParsing -Uri $base -TimeoutSec 2).Content;" ^
   "$app=(Invoke-WebRequest -UseBasicParsing -Uri ($base + '/app.js') -TimeoutSec 2).Content;" ^
   "$invalidCount = @($tables.tables | Where-Object { $_.name -notmatch '^[A-Za-z][A-Za-z0-9_]*$' }).Count;" ^
+  "$firstCommon = @($tables.tables | Where-Object { $_.is_common } | Select-Object -First 1)[0];" ^
   "if (-not $health.ok) { throw 'health failed' }" ^
   "if (($tables.table_count -as [int]) -lt 1) { throw 'table-options missing' }" ^
   "if ($invalidCount -gt 0) { throw 'table-options has invalid names' }" ^
+  "if (-not $firstCommon -or $firstCommon.frequency_tier -ne 'core') { throw 'table-options tier order failed' }" ^
   "if (-not $html.Contains('targetDialog')) { throw 'panel html is stale' }" ^
-  "if (-not ($app.Contains('serverCommonTables') -and $app.Contains('tablePresetVersion'))) { throw 'app.js is stale' }" ^
+  "if (-not ($app.Contains('serverCommonTables') -and $app.Contains('tablePresetVersion') -and $app.Contains('tableTierLabels'))) { throw 'app.js is stale' }" ^
   "exit 0"
 exit /b %errorlevel%
 

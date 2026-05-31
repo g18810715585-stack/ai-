@@ -12,7 +12,9 @@ const targetDialog = document.querySelector("#targetDialog");
 const tableSearchInput = document.querySelector("#tableSearch");
 const tableList = document.querySelector("#tableList");
 const commonTablesInput = document.querySelector("#commonTablesInput");
-const tablePresetVersion = "meta-doc-excel-local-learning-v1";
+const tablePresetVersion = "meta-doc-excel-local-learning-v2";
+const tableTierRanks = { core: 0, high: 1, medium: 2, low: 3 };
+const tableTierLabels = { core: "核心", high: "高频", medium: "中频", low: "低频" };
 
 const aiProviderDefaults = {
   chatgpt: {
@@ -97,6 +99,7 @@ let aiProvider = localStorage.getItem(storageKey("aiProvider")) || "chatgpt";
 let latestAiStatus = null;
 let tableOptions = [];
 let serverCommonTables = [];
+let serverCommonTableMeta = new Map();
 resetStoredTablesWhenPresetChanges();
 let selectedTargetTables = readJsonStorage("targetTables", []);
 let pendingTargetSelection = new Set();
@@ -200,6 +203,52 @@ function isConfigTableName(name) {
   return /^[A-Za-z][A-Za-z0-9_]*$/.test(String(name || ""));
 }
 
+function normalizeCommonTableDetails(values) {
+  const result = [];
+  const seen = new Set();
+  for (const item of values || []) {
+    const name = String(item?.name || item?.sheet || item?.key || item || "").trim();
+    if (!isConfigTableName(name) || seen.has(name)) continue;
+    seen.add(name);
+    result.push({
+      name,
+      frequency_tier: String(item?.frequency_tier || item?.frequencyTier || "").trim().toLowerCase(),
+      priority: Number.isFinite(Number(item?.priority)) ? Number(item.priority) : 0,
+      activity_tags: Array.isArray(item?.activity_tags)
+        ? item.activity_tags.map(String).filter(Boolean)
+        : Array.isArray(item?.activityTags)
+          ? item.activityTags.map(String).filter(Boolean)
+          : []
+    });
+  }
+  return result;
+}
+
+function tableMeta(name) {
+  return serverCommonTableMeta.get(name) || {};
+}
+
+function tableTier(table) {
+  const meta = tableMeta(table.name || table);
+  const tier = String(table.frequency_tier || table.frequencyTier || meta.frequency_tier || "").toLowerCase();
+  return Object.hasOwn(tableTierRanks, tier) ? tier : "";
+}
+
+function tablePriority(table) {
+  const meta = tableMeta(table.name || table);
+  const priority = Number(table.priority ?? meta.priority ?? 0);
+  return Number.isFinite(priority) ? priority : 0;
+}
+
+function compareTableOptions(left, right) {
+  const leftRank = tableTierRanks[tableTier(left)] ?? 99;
+  const rightRank = tableTierRanks[tableTier(right)] ?? 99;
+  return leftRank - rightRank ||
+    Number(!left.is_common) - Number(!right.is_common) ||
+    tablePriority(right) - tablePriority(left) ||
+    left.name.localeCompare(right.name);
+}
+
 function parseTableListText(text) {
   return normalizeTableNames(String(text || "").split(/[\n,，;；]+/));
 }
@@ -214,10 +263,10 @@ function saveCommonTables() {
   writeJsonStorage("commonTables", names);
   for (const name of names) {
     if (!tableOptions.some((table) => table.name === name)) {
-      tableOptions.push({ name, source: "common" });
+      tableOptions.push({ name, source: "常用表", is_common: true });
     }
   }
-  tableOptions.sort((left, right) => left.name.localeCompare(right.name));
+  tableOptions.sort(compareTableOptions);
   renderTableList();
 }
 
@@ -287,6 +336,8 @@ async function loadTableOptions({ silent = false } = {}) {
     if (!response.ok) throw new Error("no scan result");
     const data = await response.json();
     serverCommonTables = normalizeTableNames(data.common_tables || []);
+    const commonDetails = normalizeCommonTableDetails(data.common_table_details || []);
+    serverCommonTableMeta = new Map(commonDetails.map((item) => [item.name, item]));
     if (!commonTablesInput.value.trim() && serverCommonTables.length) {
       commonTablesInput.value = serverCommonTables.join("\n");
     }
@@ -298,12 +349,22 @@ async function loadTableOptions({ silent = false } = {}) {
         source: table.source_file || table.source || "",
         field_count: table.field_count || 0,
         primary_key: table.primary_key || [],
+        frequency_tier: table.frequency_tier || tableTier(table),
+        priority: table.priority || tablePriority(table),
+        activity_tags: table.activity_tags || [],
         is_common: Boolean(table.is_common) || commonSet.has(table.name)
       }));
     const commonOnly = [...commonSet]
       .filter((name) => !backendTables.some((table) => table.name === name))
-      .map((name) => ({ name, source: "常用表", is_common: true }));
-    tableOptions = [...commonOnly, ...backendTables].sort((left, right) => left.name.localeCompare(right.name));
+      .map((name) => ({
+        name,
+        source: "常用表",
+        is_common: true,
+        frequency_tier: tableMeta(name).frequency_tier || "",
+        priority: tableMeta(name).priority || 0,
+        activity_tags: tableMeta(name).activity_tags || []
+      }));
+    tableOptions = [...commonOnly, ...backendTables].sort(compareTableOptions);
   } catch (error) {
     tableOptions = fallbackTableOptionsFromManifest();
     if (!silent) {
@@ -334,6 +395,8 @@ function renderTableList() {
     .map((table) => {
       const checked = pendingTargetSelection.has(table.name) ? "checked" : "";
       const commonBadge = common.has(table.name) || table.is_common ? '<span class="badge">常用</span>' : "";
+      const tier = tableTier(table);
+      const tierBadge = tier ? `<span class="badge tier-${escapeHtml(tier)}">${escapeHtml(tableTierLabels[tier] || tier)}</span>` : "";
       const pk = table.primary_key?.length ? `主键：${table.primary_key.join(", ")}` : "主键：待识别";
       const fields = table.field_count ? `字段：${table.field_count}` : "";
       return `
@@ -341,7 +404,7 @@ function renderTableList() {
           <input type="checkbox" value="${escapeHtml(table.name)}" ${checked} />
           <span>
             <strong>${escapeHtml(table.name)}</strong>
-            ${commonBadge}
+            ${commonBadge}${tierBadge}
             <small>${escapeHtml([pk, fields].filter(Boolean).join(" · "))}</small>
             ${table.source ? `<small>${escapeHtml(table.source)}</small>` : ""}
           </span>
