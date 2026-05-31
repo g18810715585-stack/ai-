@@ -122,6 +122,15 @@ class TableRows:
     sheet: str | None = None
 
 
+@dataclass
+class FieldTokens:
+    field: str
+    tokens: list[str]
+    token_rows: dict[str, list[int]]
+    tokens_per_value: list[int]
+    distinct: set[str]
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -376,6 +385,25 @@ def _load_table_rows(
         workbook.close()
 
 
+def _project_rows(rows: TableRows, fields: list[str]) -> TableRows:
+    projected_fields = [field for field in fields if field in rows.fields]
+    if projected_fields == rows.fields:
+        return rows
+    projected = []
+    for row in rows.rows:
+        projected.append({
+            "__row": row.get("__row"),
+            **{field: row.get(field) for field in projected_fields},
+        })
+    return TableRows(
+        table=rows.table,
+        fields=projected_fields,
+        rows=projected,
+        path=rows.path,
+        sheet=rows.sheet,
+    )
+
+
 def _build_index(table_name: str, table: TableSchema, rows: TableRows) -> list[KeyIndex]:
     indexes = []
     for field in rows.fields:
@@ -394,6 +422,14 @@ def _build_index(table_name: str, table: TableSchema, rows: TableRows) -> list[K
         if len(values) >= 1:
             indexes.append(KeyIndex(table=table_name, field=field, kind=kind, values=values, samples=dict(samples)))
     return indexes
+
+
+def _build_value_lookup(indexes: list[KeyIndex]) -> dict[str, list[KeyIndex]]:
+    lookup: dict[str, list[KeyIndex]] = defaultdict(list)
+    for index in indexes:
+        for value in index.values:
+            lookup[value].append(index)
+    return dict(lookup)
 
 
 def _field_target_bonus(field: str, target_table: str, target_field: str) -> float:
@@ -446,38 +482,67 @@ def _risk(confidence: float, hit_rate: float) -> str:
     return "high"
 
 
-def _analyze_source_table(source: TableRows, indexes: list[KeyIndex], root_targets: set[str], hop: int) -> list[dict[str, Any]]:
+def _parse_field_tokens(source: TableRows, field: str) -> FieldTokens:
+    tokens: list[str] = []
+    token_rows: dict[str, list[int]] = defaultdict(list)
+    tokens_per_value: list[int] = []
+    for row in source.rows:
+        parsed = split_reference_values(row.get(field))
+        tokens_per_value.append(len(parsed))
+        for token in parsed:
+            tokens.append(token)
+            if len(token_rows[token]) < 3:
+                token_rows[token].append(int(row["__row"]))
+    return FieldTokens(
+        field=field,
+        tokens=tokens,
+        token_rows=dict(token_rows),
+        tokens_per_value=tokens_per_value,
+        distinct=set(tokens),
+    )
+
+
+def _analyze_source_table(
+    source: TableRows,
+    index_lookup: dict[str, list[KeyIndex]],
+    root_targets: set[str],
+    hop: int,
+) -> list[dict[str, Any]]:
     relations: list[dict[str, Any]] = []
     for field in source.fields:
-        tokens: list[str] = []
-        token_rows: dict[str, list[int]] = defaultdict(list)
-        tokens_per_value: list[int] = []
-        for row in source.rows:
-            parsed = split_reference_values(row.get(field))
-            tokens_per_value.append(len(parsed))
-            for token in parsed:
-                tokens.append(token)
-                if len(token_rows[token]) < 3:
-                    token_rows[token].append(int(row["__row"]))
-        if not tokens:
+        parsed = _parse_field_tokens(source, field)
+        if not parsed.tokens:
             continue
-        distinct = set(tokens)
-        if len(distinct) < 2 and not _field_target_bonus(field, source.table, field):
+
+        # First reduce the search space by token, then score only indexes that
+        # actually share values with this field. This keeps large schemas fast.
+        if len(parsed.distinct) < 2 and not _field_target_bonus(field, source.table, field):
             continue
-        for index in indexes:
-            if index.table == source.table:
-                continue
-            hits = [token for token in tokens if token in index.values]
-            distinct_hits = sorted({token for token in hits})
-            if not hits:
-                continue
-            hit_rate = len(hits) / len(tokens)
+
+        candidate_hits: dict[tuple[str, str], dict[str, Any]] = {}
+        for token in parsed.tokens:
+            for index in index_lookup.get(token, []):
+                if index.table == source.table:
+                    continue
+                key = (index.table, index.field)
+                bucket = candidate_hits.setdefault(
+                    key,
+                    {"index": index, "hit_count": 0, "distinct_hits": set()},
+                )
+                bucket["hit_count"] += 1
+                bucket["distinct_hits"].add(token)
+
+        for bucket in candidate_hits.values():
+            index = bucket["index"]
+            hit_count = int(bucket["hit_count"])
+            distinct_hits = sorted(bucket["distinct_hits"])
+            hit_rate = hit_count / len(parsed.tokens)
             bonus = _field_target_bonus(field, index.table, index.field)
             if bonus <= 0 and hit_rate < 0.85:
                 continue
-            if len(hits) < 2 and bonus < 0.25:
+            if hit_count < 2 and bonus < 0.25:
                 continue
-            confidence = _score_relation(field, index, hit_rate, len(hits), len(distinct_hits))
+            confidence = _score_relation(field, index, hit_rate, hit_count, len(distinct_hits))
             if confidence < 0.45:
                 continue
             relations.append(
@@ -487,19 +552,19 @@ def _analyze_source_table(source: TableRows, indexes: list[KeyIndex], root_targe
                     "to_table": index.table,
                     "to_field": index.field,
                     "to_field_kind": index.kind,
-                    "relation_type": _relation_type(field, index.field, tokens_per_value),
+                    "relation_type": _relation_type(field, index.field, parsed.tokens_per_value),
                     "confidence": confidence,
                     "risk": _risk(confidence, hit_rate),
                     "hop": hop,
                     "is_from_target": source.table in root_targets,
                     "evidence": {
-                        "source_value_count": len(tokens),
-                        "distinct_source_values": len(distinct),
-                        "hit_count": len(hits),
+                        "source_value_count": len(parsed.tokens),
+                        "distinct_source_values": len(parsed.distinct),
+                        "hit_count": hit_count,
                         "distinct_hit_count": len(distinct_hits),
                         "hit_rate": round(hit_rate, 3),
                         "matched_values": distinct_hits[:10],
-                        "source_rows": sorted({row for token in distinct_hits[:10] for row in token_rows[token]})[:10],
+                        "source_rows": sorted({row for token in distinct_hits[:10] for row in parsed.token_rows[token]})[:10],
                     },
                     "notes": "deterministic value match",
                 }
@@ -573,6 +638,7 @@ def scan_relationships(
         extra_index_names = list(refs.keys())
     else:
         extra_index_names = [*common_names, *_hinted_target_tables(root_candidate_fields, schema)]
+    root_target_set = set(root_targets)
     index_table_names = [
         name
         for name in dict.fromkeys([*root_targets, *extra_index_names])
@@ -581,40 +647,51 @@ def scan_relationships(
 
     diagnostics: dict[str, Any] = {"errors": [], "missing_refs": [], "indexed_tables": [], "analyzed_tables": []}
     key_indexes: list[KeyIndex] = []
-    table_cache: dict[tuple[str, tuple[str, ...]], TableRows] = {}
+    table_cache: dict[str, TableRows] = {}
 
     def load_rows(table_name: str, fields: list[str]) -> TableRows | None:
-        key = (table_name, tuple(fields))
-        if key in table_cache:
-            return table_cache[key]
+        fields = list(dict.fromkeys(fields))
+        cached = table_cache.get(table_name)
+        cached_field_set = set(cached.fields) if cached else set()
+        if cached and set(fields).issubset(cached_field_set):
+            return _project_rows(cached, fields)
         ref = refs.get(table_name)
         if not ref:
             diagnostics["missing_refs"].append(table_name)
             return None
+        requested_fields = fields
+        if cached:
+            requested_fields = list(dict.fromkeys([*cached.fields, *fields]))
         try:
             rows = _load_table_rows(
                 table_name,
                 schema.tables[table_name],
                 ref,
                 base_dir,
-                fields,
+                requested_fields,
                 _header_row_from_report(report, table_name),
                 max_rows,
             )
         except Exception as exc:  # noqa: BLE001 - keep the rest of the relation scan useful.
             diagnostics["errors"].append({"table": table_name, "message": str(exc)})
             return None
-        table_cache[key] = rows
-        return rows
+        table_cache[table_name] = rows
+        return _project_rows(rows, fields)
 
     for table_name in index_table_names:
         key_fields = _candidate_key_fields(schema.tables[table_name])
+        # Target tables are usually analyzed right after indexing. Loading the
+        # union once avoids reopening the same workbook for key and source fields.
+        if table_name in root_target_set:
+            key_fields = [*key_fields, *_candidate_source_fields(schema.tables[table_name])]
         rows = load_rows(table_name, key_fields)
         if not rows:
             continue
-        key_indexes.extend(_build_index(table_name, schema.tables[table_name], rows))
+        key_rows = _project_rows(rows, _candidate_key_fields(schema.tables[table_name]))
+        key_indexes.extend(_build_index(table_name, schema.tables[table_name], key_rows))
         diagnostics["indexed_tables"].append(table_name)
 
+    index_lookup = _build_value_lookup(key_indexes)
     source_tables = [name for name in root_targets if name in refs]
     first_pass: list[dict[str, Any]] = []
     for table_name in source_tables:
@@ -623,7 +700,7 @@ def scan_relationships(
         if not rows:
             continue
         diagnostics["analyzed_tables"].append(table_name)
-        first_pass.extend(_analyze_source_table(rows, key_indexes, set(root_targets), 1))
+        first_pass.extend(_analyze_source_table(rows, index_lookup, root_target_set, 1))
 
     one_hop = sorted(
         {
@@ -639,7 +716,7 @@ def scan_relationships(
         if not rows:
             continue
         diagnostics["analyzed_tables"].append(table_name)
-        second_pass.extend(_analyze_source_table(rows, key_indexes, set(root_targets), 2))
+        second_pass.extend(_analyze_source_table(rows, index_lookup, root_target_set, 2))
 
     relations = _dedupe_relations([*first_pass, *second_pass])
     high_confidence = [item for item in relations if item["confidence"] >= 0.75]

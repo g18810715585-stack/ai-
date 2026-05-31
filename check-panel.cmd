@@ -12,7 +12,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  $html=(Invoke-WebRequest -UseBasicParsing -Uri $base -TimeoutSec 2).Content;" ^
   "  $appResp=Invoke-WebRequest -UseBasicParsing -Uri ($base + '/app.js') -TimeoutSec 2;" ^
   "  $app=$appResp.Content;" ^
-  "  $appReady = $app.Contains('serverCommonTables') -and $app.Contains('tablePresetVersion') -and $app.Contains('tableTierLabels') -and $app.Contains('compactRelationshipMap');" ^
+  "  $appReady = $app.Contains('serverCommonTables') -and $app.Contains('tablePresetVersion') -and $app.Contains('tableTierLabels') -and $app.Contains('compactRelationshipMap') -and $app.Contains('setActionBusy');" ^
   "  $invalidCount = @($tables.tables | Where-Object { $_.name -notmatch '^[A-Za-z][A-Za-z0-9_]*$' }).Count;" ^
   "  $firstCommon = @($tables.tables | Where-Object { $_.is_common } | Select-Object -First 1)[0];" ^
   "  $tierOrderOk = $firstCommon -and ($firstCommon.frequency_tier -eq 'core');" ^

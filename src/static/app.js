@@ -146,6 +146,29 @@ function escapeHtml(value) {
 function setStatus(text, state = "") {
   statusEl.textContent = text;
   statusEl.className = `status ${state}`.trim();
+  statusEl.dataset.state = state || "idle";
+}
+
+// Only the clicked workflow button stays enabled while a long backend action runs.
+function setActionBusy(button, label, busy) {
+  if (!button) return;
+  const actionButtons = Array.from(document.querySelectorAll(".actions button"));
+  if (busy) {
+    button.dataset.originalText = button.dataset.originalText || button.textContent;
+    button.textContent = `正在${label}...`;
+    button.classList.add("running");
+    button.setAttribute("aria-busy", "true");
+    for (const actionButton of actionButtons) {
+      actionButton.disabled = actionButton !== button;
+    }
+    return;
+  }
+  button.textContent = button.dataset.originalText || label;
+  button.classList.remove("running");
+  button.removeAttribute("aria-busy");
+  for (const actionButton of actionButtons) {
+    actionButton.disabled = false;
+  }
 }
 
 function setDraftMode(mode) {
@@ -269,6 +292,7 @@ function saveCommonTables() {
   }
   tableOptions.sort(compareTableOptions);
   renderTableList();
+  setStatus(`已保存 ${names.length} 张常用表`, "ok");
 }
 
 function selectedTableOrder() {
@@ -332,6 +356,7 @@ function fallbackTableOptionsFromManifest() {
 }
 
 async function loadTableOptions({ silent = false } = {}) {
+  let refreshed = true;
   try {
     const response = await fetch("/api/table-options");
     if (!response.ok) throw new Error("no scan result");
@@ -367,12 +392,14 @@ async function loadTableOptions({ silent = false } = {}) {
       }));
     tableOptions = [...commonOnly, ...backendTables].sort(compareTableOptions);
   } catch (error) {
+    refreshed = false;
     tableOptions = fallbackTableOptionsFromManifest();
     if (!silent) {
       setStatus(`表列表未刷新：${error.message}`, "error");
     }
   }
   renderTableList();
+  return refreshed;
 }
 
 function renderTableList() {
@@ -420,7 +447,11 @@ function openTargetDialog() {
   tableSearchInput.value = "";
   commonTablesInput.value = readJsonStorage("commonTables", []).join("\n");
   targetDialog.hidden = false;
-  loadTableOptions({ silent: true }).then(() => tableSearchInput.focus());
+  setStatus("正在加载可选配置表...", "busy");
+  loadTableOptions({ silent: true }).then((refreshed) => {
+    tableSearchInput.focus();
+    setStatus(refreshed ? "配置表选择已就绪" : "使用本地缓存配置表列表", refreshed ? "ok" : "error");
+  });
 }
 
 function closeTargetDialog() {
@@ -433,6 +464,7 @@ function saveTargetSelection() {
   updateTargetSummary();
   applyTargetTablesToManifest();
   closeTargetDialog();
+  setStatus(`已选择 ${selectedTargetTables.length} 张目标配置表`, "ok");
 }
 
 function saveRememberedInputs() {
@@ -494,8 +526,8 @@ function ensurePlanningSource(manifest) {
   throw new Error("请先填写飞书规划链接，或在 Manifest 里配置 planning_sources");
 }
 
-async function callApi(route, payload) {
-  setStatus("处理中...", "busy");
+async function callApi(route, payload, { label = "处理" } = {}) {
+  setStatus(`正在${label}...`, "busy");
   const response = await fetch(route, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -510,11 +542,11 @@ async function callApi(route, payload) {
   }
   rawText.textContent = JSON.stringify(data, null, 2);
   if (!response.ok) {
-    setStatus("出错", "error");
+    setStatus(`${label}失败`, "error");
     showTab("raw");
     throw new Error(data.error || data.stderr || "请求失败");
   }
-  setStatus("就绪");
+  setStatus(`${label}完成`, "ok");
   return data;
 }
 
@@ -607,11 +639,16 @@ async function loadLatestSchema() {
   }
 }
 
-async function runAction(action) {
+async function runAction(event, action) {
+  const button = event.currentTarget;
+  const label = button?.dataset.originalText || button?.textContent?.trim() || "处理";
+  setActionBusy(button, label, true);
   try {
-    await action();
+    await action(label);
   } catch (error) {
-    setStatus(`出错：${error.message}`, "error");
+    setStatus(`${label}失败：${error.message}`, "error");
+  } finally {
+    setActionBusy(button, label, false);
   }
 }
 
@@ -627,6 +664,7 @@ document.querySelector("#loadSample").addEventListener("click", () => {
   writeJsonStorage("targetTables", selectedTargetTables);
   manifestText.value = JSON.stringify(sampleManifest, null, 2);
   updateTargetSummary();
+  setStatus("示例已加载", "ok");
 });
 
 for (const button of document.querySelectorAll("[data-ai-mode]")) {
@@ -643,14 +681,20 @@ document.querySelector("#saveTargetSelection").addEventListener("click", saveTar
 document.querySelector("#clearTargetSelection").addEventListener("click", () => {
   pendingTargetSelection.clear();
   renderTableList();
+  setStatus("已清空待选配置表", "ok");
 });
-document.querySelector("#refreshTableOptions").addEventListener("click", () => loadTableOptions());
+document.querySelector("#refreshTableOptions").addEventListener("click", async () => {
+  setStatus("正在刷新配置表列表...", "busy");
+  const refreshed = await loadTableOptions();
+  if (refreshed) setStatus("配置表列表已刷新", "ok");
+});
 document.querySelector("#saveCommonTables").addEventListener("click", saveCommonTables);
 document.querySelector("#selectCommonTables").addEventListener("click", () => {
   for (const name of commonTableNames()) {
     pendingTargetSelection.add(name);
   }
   renderTableList();
+  setStatus("已勾选常用表", "ok");
 });
 tableSearchInput.addEventListener("input", renderTableList);
 tableList.addEventListener("change", (event) => {
@@ -669,9 +713,9 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !targetDialog.hidden) closeTargetDialog();
 });
 
-document.querySelector("#schemaScanBtn").addEventListener("click", () => runAction(async () => {
+document.querySelector("#schemaScanBtn").addEventListener("click", (event) => runAction(event, async (label) => {
   const payload = await buildPayload();
-  const data = await callApi("/api/schema-scan", payload);
+  const data = await callApi("/api/schema-scan", payload, { label });
   rememberSchemaPath(data.artifact?.schemaDraft?.path || parseStdout(data).schema_draft);
   await loadTableOptions({ silent: true });
   resultText.textContent = JSON.stringify(compactSchemaResult(data), null, 2);
@@ -679,24 +723,24 @@ document.querySelector("#schemaScanBtn").addEventListener("click", () => runActi
   if (!selectedTargetTables.length) openTargetDialog();
 }));
 
-document.querySelector("#relationsBtn").addEventListener("click", () => runAction(async () => {
+document.querySelector("#relationsBtn").addEventListener("click", (event) => runAction(event, async (label) => {
   ensureTargetTablesSelected();
   const payload = await buildPayload();
   if (draftMode === "real") {
     const aiStatus = latestAiStatus?.ready ? latestAiStatus : await loadAiStatus();
     payload.explain = Boolean(aiStatus?.ready);
   }
-  const data = await callApi("/api/relations", payload);
+  const data = await callApi("/api/relations", payload, { label });
   relationsText.textContent = JSON.stringify(compactRelationshipMap(data), null, 2);
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   showTab("relations");
 }));
 
-document.querySelector("#analyzeBtn").addEventListener("click", () => runAction(async () => {
+document.querySelector("#analyzeBtn").addEventListener("click", (event) => runAction(event, async (label) => {
   ensureTargetTablesSelected();
   const payload = await buildPayload();
   ensurePlanningSource(payload.manifest);
-  const data = await callApi("/api/analyze", payload);
+  const data = await callApi("/api/analyze", payload, { label });
   if (data.artifact?.relationshipMap) {
     relationsText.textContent = JSON.stringify(compactRelationshipMap(data), null, 2);
   }
@@ -704,7 +748,7 @@ document.querySelector("#analyzeBtn").addEventListener("click", () => runAction(
   showTab("result");
 }));
 
-document.querySelector("#draftBtn").addEventListener("click", () => runAction(async () => {
+document.querySelector("#draftBtn").addEventListener("click", (event) => runAction(event, async (label) => {
   ensureTargetTablesSelected();
   const payload = await buildPayload();
   ensurePlanningSource(payload.manifest);
@@ -715,7 +759,7 @@ document.querySelector("#draftBtn").addEventListener("click", () => runAction(as
     }
   }
   payload.stub = draftMode !== "real";
-  const data = await callApi("/api/draft", payload);
+  const data = await callApi("/api/draft", payload, { label });
   if (data.artifact?.patch) {
     lastPatch = data.artifact.patch;
     patchText.value = JSON.stringify(lastPatch, null, 2);
@@ -727,20 +771,20 @@ document.querySelector("#draftBtn").addEventListener("click", () => runAction(as
   showTab("patch");
 }));
 
-document.querySelector("#applyBtn").addEventListener("click", () => runAction(async () => {
+document.querySelector("#applyBtn").addEventListener("click", (event) => runAction(event, async (label) => {
   const payload = await buildPayload();
   payload.patch = JSON.parse(patchText.value || JSON.stringify(lastPatch || {}));
-  const data = await callApi("/api/apply", payload);
+  const data = await callApi("/api/apply", payload, { label });
   resultText.textContent = JSON.stringify(data.artifact || parseStdout(data), null, 2);
   showTab("result");
 }));
 
-document.querySelector("#learnBtn").addEventListener("click", () => runAction(async () => {
+document.querySelector("#learnBtn").addEventListener("click", (event) => runAction(event, async (label) => {
   const payload = await buildPayload();
   payload.patch = JSON.parse(patchText.value || JSON.stringify(lastPatch || {}));
   payload.decision = "accepted";
   payload.note = "从本地面板确认通过";
-  const data = await callApi("/api/learn", payload);
+  const data = await callApi("/api/learn", payload, { label });
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   showTab("result");
 }));
