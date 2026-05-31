@@ -409,6 +409,7 @@ function collectArtifact(result) {
   }
   const artifact = {};
   if (parsed.patch) artifact.patch = maybeReadJson(parsed.patch);
+  if (parsed.draft_table_preview) artifact.draftTablePreview = maybeReadJson(parsed.draft_table_preview);
   if (parsed.experience_summary) artifact.experienceSummary = maybeReadJson(parsed.experience_summary);
   if (parsed.config_plan) artifact.configPlan = maybeReadJson(parsed.config_plan);
   if (parsed.draft_diagnostics) artifact.draftDiagnostics = maybeReadJson(parsed.draft_diagnostics);
@@ -425,6 +426,7 @@ function collectArtifact(result) {
     artifact.planningItemResolution = artifact.planningItemResolution || maybeReadJson(path.join(parsed.run_dir, "planning-item-resolution.json"));
     artifact.configPlan = artifact.configPlan || maybeReadJson(path.join(parsed.run_dir, "config-plan.json"));
     artifact.draftDiagnostics = artifact.draftDiagnostics || maybeReadJson(path.join(parsed.run_dir, "draft-diagnostics.json"));
+    artifact.draftTablePreview = artifact.draftTablePreview || maybeReadJson(path.join(parsed.run_dir, "draft-table-preview.json"));
     artifact.configurationRecord = artifact.configurationRecord || maybeReadJson(path.join(parsed.run_dir, "configuration-record.json"));
     artifact.caseReview = artifact.caseReview || maybeReadJson(path.join(parsed.run_dir, "case-review.json"));
     artifact.diff = maybeReadJson(path.join(parsed.run_dir, "diff.json"));

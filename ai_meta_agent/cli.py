@@ -27,6 +27,7 @@ from .draft_diagnostics import (
     compact_draft_diagnostic_context,
     extract_ai_reasoning,
 )
+from .draft_preview import build_draft_table_preview
 from .experience import (
     append_case_from_patch,
     build_experience_context,
@@ -436,6 +437,8 @@ def cmd_draft(args: argparse.Namespace) -> int:
     Patch.model_validate(patch.model_dump())
     write_json(run_dir / "patch.json", patch.model_dump(mode="json", exclude_none=True))
     write_json(run_dir / "candidate-habits.json", _candidate_habits_from_patch(patch))
+    draft_table_preview = build_draft_table_preview(manifest, schema, patch, base_dir)
+    write_json(run_dir / "draft-table-preview.json", draft_table_preview)
     ai_review = None
     ai_reason = extract_ai_reasoning(run_dir / "ai-response.json")
     if not args.stub and not patch.operations:
@@ -461,6 +464,7 @@ def cmd_draft(args: argparse.Namespace) -> int:
             {
                 "run_dir": str(run_dir),
                 "patch": str(run_dir / "patch.json"),
+                "draft_table_preview": str(run_dir / "draft-table-preview.json"),
                 "draft_diagnostics": str(run_dir / "draft-diagnostics.json"),
                 "operations": len(patch.operations),
                 "diagnostic_status": diagnostics["status"],

@@ -826,6 +826,147 @@ button:disabled {
   min-height: 0;
 }
 
+.data-preview {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.data-preview-table {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.data-preview-table header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.data-preview-table h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.data-preview-table p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.data-preview-table header span {
+  flex: 0 0 auto;
+  border: 1px solid #b9d8d1;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--accent);
+  background: #eef8f5;
+  font-size: 12px;
+}
+
+.data-preview-warnings {
+  display: grid;
+  gap: 4px;
+  padding: 0 12px;
+  color: var(--accent-2);
+  font-size: 12px;
+}
+
+.data-preview-scroll {
+  overflow: auto;
+  max-height: 520px;
+}
+
+.data-preview table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.data-preview th,
+.data-preview td {
+  min-width: 110px;
+  max-width: 260px;
+  border-top: 1px solid #edf1f5;
+  border-right: 1px solid #edf1f5;
+  padding: 6px 8px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.data-preview th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #eef8f5;
+  color: var(--accent);
+  text-align: left;
+}
+
+.data-preview .row-kind {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  min-width: 132px;
+  max-width: 170px;
+  background: #fbfcfd;
+}
+
+.data-preview td.row-kind {
+  color: var(--muted);
+}
+
+.data-preview td.row-kind strong,
+.data-preview td.row-kind small {
+  display: block;
+}
+
+.data-preview td.row-kind small {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.data-preview .field-row td {
+  background: #f8fafc;
+  color: var(--muted);
+}
+
+.data-preview .changed-row td {
+  background: #fff;
+}
+
+.data-preview .changed-cell {
+  background: #fff7e6;
+  color: var(--ink);
+}
+
+.before-value {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.change-arrow {
+  display: inline-block;
+  margin: 0 5px;
+  color: var(--accent-2);
+}
+
+.after-value {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 pre {
   height: 100%;
   margin: 0;

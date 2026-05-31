@@ -233,6 +233,7 @@ function stepPaths(parsed) {
       relationship_map: parsed.relationship_map,
       analysis: parsed.run_dir ? path.join(parsed.run_dir, "analysis.json") : null,
       config_plan: parsed.config_plan,
+      draft_table_preview: parsed.draft_table_preview,
       draft_diagnostics: parsed.draft_diagnostics,
       patch: parsed.patch,
       result: parsed.result,
@@ -267,6 +268,7 @@ function stepSummary(step, artifact = {}, parsed = {}) {
     return {
       operation_count: artifact.patch?.operations?.length || 0,
       status: artifact.draftDiagnostics?.status || "draft",
+      table_preview_count: artifact.draftTablePreview?.table_count || 0,
       target_tables: [...new Set((artifact.patch?.operations || []).map((operation) => operation.target_table))]
     };
   }
@@ -317,6 +319,7 @@ function stepData(step, artifact = {}, parsed = {}) {
       patch: artifact.patch || null,
       configPlan: artifact.configPlan || null,
       draftDiagnostics: artifact.draftDiagnostics || null,
+      draftTablePreview: artifact.draftTablePreview || null,
       relationshipMap: compactRelationshipMap(artifact.relationshipMap || {})
     };
   }

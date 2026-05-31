@@ -7,6 +7,7 @@ const confirmationsText = document.querySelector("#confirmationsText");
 const resultText = document.querySelector("#resultText");
 const recordText = document.querySelector("#recordText");
 const rawText = document.querySelector("#rawText");
+const dataPreview = document.querySelector("#dataPreview");
 const statusEl = document.querySelector("#status");
 const projectSelect = document.querySelector("#projectSelect");
 const projectMeta = document.querySelector("#projectMeta");
@@ -130,6 +131,7 @@ resetStoredTablesWhenPresetChanges();
 let selectedTargetTables = readJsonStorage("targetTables", []);
 let pendingTargetSelection = new Set();
 let latestExperienceSummary = null;
+let latestDraftTablePreview = null;
 let savedExperiences = [];
 let selectedExperienceId = "";
 let lastApplyResult = null;
@@ -368,6 +370,9 @@ function restoreProjectSteps(project) {
   }
   const diagnostics = steps.draft?.data?.draftDiagnostics;
   if (diagnostics) diagnosticsText.textContent = formatDraftDiagnostics(diagnostics);
+  if (steps.draft?.data?.draftTablePreview) {
+    renderDraftTablePreview(steps.draft.data.draftTablePreview);
+  }
   const experienceSummary = steps.experienceSummary?.data?.experienceSummary;
   if (experienceSummary) {
     latestExperienceSummary = experienceSummary;
@@ -459,7 +464,8 @@ function showProjectStep(step) {
   if (step === "draft") {
     if (record.data?.patch) patchText.value = JSON.stringify(record.data.patch, null, 2);
     if (record.data?.draftDiagnostics) diagnosticsText.textContent = formatDraftDiagnostics(record.data.draftDiagnostics);
-    showTab(record.data?.patch ? "patch" : "diagnostics");
+    if (record.data?.draftTablePreview) renderDraftTablePreview(record.data.draftTablePreview);
+    showTab(record.data?.draftTablePreview?.table_count ? "dataPreview" : record.data?.patch ? "patch" : "diagnostics");
     return;
   }
   if (step === "experienceSummary" && record.data?.experienceSummary) {
@@ -1148,6 +1154,90 @@ function compactDraftDiagnostics(data) {
   return data.artifact?.draftDiagnostics || null;
 }
 
+function compactDraftTablePreview(data) {
+  return data.artifact?.draftTablePreview || data.draft_table_preview || null;
+}
+
+function renderDraftTablePreview(preview) {
+  latestDraftTablePreview = preview || null;
+  if (!dataPreview) return;
+  const tables = preview?.tables || [];
+  if (!tables.length) {
+    dataPreview.innerHTML = '<div class="empty-state">本次草案没有新增或修改数据行。</div>';
+    return;
+  }
+  dataPreview.innerHTML = tables.map(renderDraftPreviewTable).join("");
+}
+
+function renderDraftPreviewTable(table) {
+  const fields = table.fields || [];
+  const rows = [
+    ...(table.header_rows || []).map((row) => ({ ...row, previewSection: "header" })),
+    ...(table.changed_rows || []).map((row) => ({ ...row, previewSection: "changed" }))
+  ];
+  const warningHtml = (table.warnings || []).length
+    ? `<div class="data-preview-warnings">${(table.warnings || []).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+    : "";
+  const body = rows.length
+    ? rows.map((row) => renderDraftPreviewRow(row, fields)).join("")
+    : `<tr><td class="row-kind" colspan="${fields.length + 1}">没有可显示的数据行</td></tr>`;
+  return `
+    <section class="data-preview-table">
+      <header>
+        <div>
+          <h3>${escapeHtml(table.table || "未命名表")}</h3>
+          <p>${escapeHtml(table.source_file || "")}${table.sheet ? ` · sheet ${escapeHtml(table.sheet)}` : ""}</p>
+        </div>
+        <span>${escapeHtml(String(table.changed_row_count || 0))} 行变更</span>
+      </header>
+      ${warningHtml}
+      <div class="data-preview-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th class="row-kind">行类型</th>
+              ${fields.map((field) => `<th>${escapeHtml(field)}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function renderDraftPreviewRow(row, fields) {
+  const rowClass = row.previewSection === "header" ? "field-row" : "changed-row";
+  const label = row.row_kind || row.op || "";
+  return `
+    <tr class="${rowClass}">
+      <td class="row-kind">
+        <strong>${escapeHtml(label)}</strong>
+        ${row.row_number ? `<small>原表第 ${escapeHtml(row.row_number)} 行</small>` : ""}
+        ${row.operation_index ? `<small>操作 ${escapeHtml(row.operation_index)} · ${escapeHtml(row.op || "")}</small>` : ""}
+      </td>
+      ${fields.map((field) => renderDraftPreviewCell(row, field)).join("")}
+    </tr>
+  `;
+}
+
+function renderDraftPreviewCell(row, field) {
+  const value = row.values?.[field];
+  const before = row.before?.[field];
+  const changed = (row.changed_fields || []).includes(field);
+  const className = changed ? ' class="changed-cell"' : "";
+  if (changed && before !== undefined && before !== null && String(before) !== String(value ?? "")) {
+    return `<td${className}><span class="before-value">${escapeHtml(formatCellValue(before))}</span><span class="change-arrow">→</span><span class="after-value">${escapeHtml(formatCellValue(value))}</span></td>`;
+  }
+  return `<td${className}>${escapeHtml(formatCellValue(value))}</td>`;
+}
+
+function formatCellValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 function compactConfigPlan(data) {
   return data.artifact?.configPlan || data.config_plan || null;
 }
@@ -1679,13 +1769,14 @@ document.querySelector("#draftBtn").addEventListener("click", (event) => runActi
     relationsText.textContent = JSON.stringify(compactRelationshipMap(data), null, 2);
   }
   renderPlanArtifact(data);
+  renderDraftTablePreview(compactDraftTablePreview(data));
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   const operationCount = data.artifact?.patch?.operations?.length || 0;
   if (operationCount === 0 && diagnostics) {
     setStatus("生成草案完成：没有安全变更，已生成诊断", "ok");
     showTab("diagnostics");
   } else {
-    showTab("patch");
+    showTab("dataPreview");
   }
 }));
 

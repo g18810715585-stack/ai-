@@ -105,6 +105,7 @@
 
       <section class="panel review-panel">
         <div class="tabs">
+          <button class="tab" data-tab="dataPreview">数据预览</button>
           <button class="tab active" data-tab="patch">变更 Patch</button>
           <button class="tab" data-tab="plan">配表计划</button>
           <button class="tab" data-tab="confirmations">待确认字段</button>
@@ -115,6 +116,11 @@
           <button class="tab" data-tab="raw">原始响应</button>
         </div>
 
+        <div id="dataPreviewTab" class="tab-content">
+          <div id="dataPreview" class="data-preview">
+            <div class="empty-state">生成草案后，这里会显示本次涉及表的字段区和新增/修改行。</div>
+          </div>
+        </div>
         <div id="patchTab" class="tab-content active">
           <textarea id="patchText" spellcheck="false"></textarea>
         </div>

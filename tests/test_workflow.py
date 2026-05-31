@@ -17,6 +17,7 @@ from ai_meta_agent.cli import _auto_expand_generation_tables, analyze_manifest
 from ai_meta_agent.configuration_records import build_configuration_record, local_case_review, save_case_review
 from ai_meta_agent.draft import call_baseai, call_draft_diagnostics_ai, call_experience_summary_ai, call_relationship_ai, make_stub_patch
 from ai_meta_agent.draft_diagnostics import build_draft_diagnostics, compact_draft_diagnostic_context
+from ai_meta_agent.draft_preview import build_draft_table_preview
 from ai_meta_agent.experience import (
     append_case_from_patch,
     build_experience_context,
@@ -153,6 +154,16 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(len(patch.operations), 2)
             self.assertEqual([op.op for op in patch.operations], ["update", "insert"])
             self.assertTrue(all(op.needs_confirmation for op in patch.operations))
+            draft_preview = build_draft_table_preview(manifest, schema, patch, tmp)
+            self.assertEqual(draft_preview["table_count"], 1)
+            table_preview = draft_preview["tables"][0]
+            self.assertEqual(table_preview["table"], "shop_pack_config")
+            self.assertEqual(len(table_preview["header_rows"]), 3)
+            self.assertIn("pack_id", table_preview["fields"])
+            self.assertEqual([row["row_kind"] for row in table_preview["changed_rows"]], ["修改", "新增"])
+            changed_name = table_preview["changed_rows"][0]["values"]["name"]
+            self.assertEqual(changed_name, "每日礼包")
+            self.assertEqual(table_preview["changed_rows"][0]["before"]["name"], "旧每日礼包")
 
             apply_dir = tmp / ".runs" / "apply-test"
             apply_dir.mkdir(parents=True)
