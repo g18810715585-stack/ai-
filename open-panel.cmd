@@ -46,7 +46,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "if (($tables.table_count -as [int]) -lt 1) { throw 'table-options missing' }" ^
   "if ($invalidCount -gt 0) { throw 'table-options has invalid names' }" ^
   "if (-not $firstCommon -or $firstCommon.frequency_tier -ne 'core') { throw 'table-options tier order failed' }" ^
-  "if (-not ($html.Contains('targetDialog') -and $html.Contains('relationsBtn') -and $html.Contains('relationsTab'))) { throw 'panel html is stale' }" ^
+  "if (-not ($html.Contains('targetDialog') -and $html.Contains('relationsBtn') -and $html.Contains('relationsTab') -and $html.Contains('internal-manifest') -and ($html.IndexOf('manifest-field') -lt 0))) { throw 'panel html is stale' }" ^
   "if (-not ($app.Contains('serverCommonTables') -and $app.Contains('tablePresetVersion') -and $app.Contains('tableTierLabels') -and $app.Contains('compactRelationshipMap') -and $app.Contains('setActionBusy'))) { throw 'app.js is stale' }" ^
   "exit 0"
 exit /b %errorlevel%

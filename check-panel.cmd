@@ -16,7 +16,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  $invalidCount = @($tables.tables | Where-Object { $_.name -notmatch '^[A-Za-z][A-Za-z0-9_]*$' }).Count;" ^
   "  $firstCommon = @($tables.tables | Where-Object { $_.is_common } | Select-Object -First 1)[0];" ^
   "  $tierOrderOk = $firstCommon -and ($firstCommon.frequency_tier -eq 'core');" ^
-  "  $htmlReady = $html.Contains('targetDialog') -and $html.Contains('relationsBtn') -and $html.Contains('relationsTab');" ^
+  "  $htmlReady = $html.Contains('targetDialog') -and $html.Contains('relationsBtn') -and $html.Contains('relationsTab') -and $html.Contains('internal-manifest') -and ($html.IndexOf('manifest-field') -lt 0);" ^
   "  $ok = $health.ok -and (($tables.table_count -as [int]) -gt 0) -and ($invalidCount -eq 0) -and $htmlReady -and $appReady -and $tierOrderOk;" ^
   "  [pscustomobject]@{ reachable=$true; ok=$ok; pid=$health.pid; tableCount=$tables.table_count; commonCount=$tables.common_tables.Count; invalidNameCount=$invalidCount; firstCommon=$firstCommon.name; firstTier=$firstCommon.frequency_tier; tierOrderOk=$tierOrderOk; htmlReady=$htmlReady; appReady=$appReady; cacheControl=$appResp.Headers['Cache-Control'] } | ConvertTo-Json -Compress | Write-Host;" ^
   "  if ($ok) { exit 0 } else { exit 1 }" ^

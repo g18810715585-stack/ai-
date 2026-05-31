@@ -183,6 +183,10 @@ button:disabled {
   opacity: 0.6;
 }
 
+.internal-manifest {
+  display: none !important;
+}
+
 .field-title {
   color: var(--muted);
   font-size: 13px;
