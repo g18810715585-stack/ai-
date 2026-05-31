@@ -12,8 +12,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  $html=(Invoke-WebRequest -UseBasicParsing -Uri $base -TimeoutSec 2).Content;" ^
   "  $appResp=Invoke-WebRequest -UseBasicParsing -Uri ($base + '/app.js') -TimeoutSec 2;" ^
   "  $app=$appResp.Content;" ^
-  "  $ok = $health.ok -and (($tables.table_count -as [int]) -gt 0) -and $html.Contains('targetDialog') -and $app.Contains('serverCommonTables');" ^
-  "  [pscustomobject]@{ reachable=$true; ok=$ok; pid=$health.pid; tableCount=$tables.table_count; commonCount=$tables.common_tables.Count; htmlReady=$html.Contains('targetDialog'); appReady=$app.Contains('serverCommonTables'); cacheControl=$appResp.Headers['Cache-Control'] } | ConvertTo-Json -Compress | Write-Host;" ^
+  "  $appReady = $app.Contains('serverCommonTables') -and $app.Contains('tablePresetVersion');" ^
+  "  $ok = $health.ok -and (($tables.table_count -as [int]) -gt 0) -and $html.Contains('targetDialog') -and $appReady;" ^
+  "  [pscustomobject]@{ reachable=$true; ok=$ok; pid=$health.pid; tableCount=$tables.table_count; commonCount=$tables.common_tables.Count; htmlReady=$html.Contains('targetDialog'); appReady=$appReady; cacheControl=$appResp.Headers['Cache-Control'] } | ConvertTo-Json -Compress | Write-Host;" ^
   "  if ($ok) { exit 0 } else { exit 1 }" ^
   "} catch {" ^
   "  [pscustomobject]@{ reachable=$false; ok=$false; error=$_.Exception.Message } | ConvertTo-Json -Compress | Write-Host;" ^

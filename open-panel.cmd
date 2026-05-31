@@ -43,7 +43,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "if (-not $health.ok) { throw 'health failed' }" ^
   "if (($tables.table_count -as [int]) -lt 1) { throw 'table-options missing' }" ^
   "if (-not $html.Contains('targetDialog')) { throw 'panel html is stale' }" ^
-  "if (-not $app.Contains('serverCommonTables')) { throw 'app.js is stale' }" ^
+  "if (-not ($app.Contains('serverCommonTables') -and $app.Contains('tablePresetVersion'))) { throw 'app.js is stale' }" ^
   "exit 0"
 exit /b %errorlevel%
 

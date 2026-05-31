@@ -12,6 +12,7 @@ const targetDialog = document.querySelector("#targetDialog");
 const tableSearchInput = document.querySelector("#tableSearch");
 const tableList = document.querySelector("#tableList");
 const commonTablesInput = document.querySelector("#commonTablesInput");
+const tablePresetVersion = "meta-doc-excel-local-learning-v1";
 
 const aiProviderDefaults = {
   chatgpt: {
@@ -96,6 +97,7 @@ let aiProvider = localStorage.getItem(storageKey("aiProvider")) || "chatgpt";
 let latestAiStatus = null;
 let tableOptions = [];
 let serverCommonTables = [];
+resetStoredTablesWhenPresetChanges();
 let selectedTargetTables = readJsonStorage("targetTables", []);
 let pendingTargetSelection = new Set();
 
@@ -119,6 +121,13 @@ function readJsonStorage(name, fallback) {
 
 function writeJsonStorage(name, value) {
   localStorage.setItem(storageKey(name), JSON.stringify(value));
+}
+
+function resetStoredTablesWhenPresetChanges() {
+  if (localStorage.getItem(storageKey("tablePresetVersion")) === tablePresetVersion) return;
+  localStorage.removeItem(storageKey("targetTables"));
+  localStorage.removeItem(storageKey("commonTables"));
+  localStorage.setItem(storageKey("tablePresetVersion"), tablePresetVersion);
 }
 
 function escapeHtml(value) {
@@ -630,9 +639,6 @@ manifestText.value = JSON.stringify(sampleManifest, null, 2);
 restoreRememberedInputs();
 const storedCommonTables = readJsonStorage("commonTables", []);
 commonTablesInput.value = storedCommonTables.join("\n");
-if (!selectedTargetTables.length) {
-  selectedTargetTables = normalizeTableNames(sampleManifest.target_tables);
-}
 applyTargetTablesToManifest();
 setAiProvider(aiProvider);
 setDraftMode(draftMode);
