@@ -10,7 +10,7 @@
     <header class="topbar">
       <div>
         <h1>AI 配表代理人</h1>
-        <p>读取规划表，生成可审核的配置变更、预览表、校验报告和习惯记录</p>
+        <p>读取飞书规划和本地配置目录，生成可审核的配置变更、预览表、校验报告和习惯记录</p>
       </div>
       <div class="status" id="status">就绪</div>
     </header>
@@ -23,29 +23,22 @@
         </div>
 
         <label>
-          规划表 Excel
-          <input id="planningFile" type="file" accept=".xlsx,.xlsm" />
-        </label>
-
-        <label>
-          飞书规划链接（文档/表格）
+          飞书规划链接
           <input id="planningFeishuUrl" type="url" placeholder="粘贴飞书文档、知识库表格或电子表格链接" />
         </label>
 
         <label>
-          配置表目录（推荐）
+          配置表目录
           <input id="configDir" placeholder="例如 C:\TopHero\Meta\meta_local" />
         </label>
 
-        <label>
-          单张配置表 Excel（可选）
-          <input id="configFile" type="file" accept=".xlsx,.xlsm" />
-        </label>
-
-        <label>
-          目标配置表名（sheet 名）
-          <input id="configTableName" placeholder="填写真实 sheet 名，例如 activity" />
-        </label>
+        <section class="target-picker">
+          <div>
+            <div class="field-title">目标配置表</div>
+            <p id="targetTablesSummary" class="target-summary">尚未选择。请先扫描配置目录，再选择本次活动的主要关联表。</p>
+          </div>
+          <button id="openTargetDialog" type="button">选择配置表</button>
+        </section>
 
         <label>
           运行配置 Manifest
@@ -98,6 +91,44 @@
         </div>
       </section>
     </main>
+
+    <div id="targetDialog" class="dialog-backdrop" hidden>
+      <section class="dialog-panel" role="dialog" aria-modal="true" aria-labelledby="targetDialogTitle">
+        <header class="dialog-header">
+          <div>
+            <h2 id="targetDialogTitle">选择目标配置表</h2>
+            <p>勾选本次活动的几张主要关联表，AI 会在这些表之间分析字段和主外键关系。</p>
+          </div>
+          <button id="closeTargetDialog" class="icon-button" type="button" aria-label="关闭">×</button>
+        </header>
+
+        <div class="dialog-tools">
+          <input id="tableSearch" placeholder="搜索 sheet 名或来源文件" />
+          <button id="refreshTableOptions" type="button">刷新列表</button>
+        </div>
+
+        <div class="common-editor">
+          <label>
+            常用表列表
+            <textarea id="commonTablesInput" spellcheck="false" placeholder="每行一个 sheet 名。也可以用逗号或分号分隔。"></textarea>
+          </label>
+          <div class="common-actions">
+            <button id="saveCommonTables" type="button">保存常用表</button>
+            <button id="selectCommonTables" type="button">勾选常用表</button>
+          </div>
+        </div>
+
+        <div id="tableList" class="table-list"></div>
+
+        <footer class="dialog-footer">
+          <button id="clearTargetSelection" type="button">清空选择</button>
+          <div class="dialog-footer-actions">
+            <button id="cancelTargetSelection" type="button">取消</button>
+            <button id="saveTargetSelection" class="primary-button" type="button">保存选择</button>
+          </div>
+        </footer>
+      </section>
+    </div>
 
     <script src="/app.js"></script>
   </body>

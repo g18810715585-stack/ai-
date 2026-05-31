@@ -3,11 +3,15 @@ const patchText = document.querySelector("#patchText");
 const resultText = document.querySelector("#resultText");
 const rawText = document.querySelector("#rawText");
 const statusEl = document.querySelector("#status");
-const tableNameInput = document.querySelector("#configTableName");
 const configDirInput = document.querySelector("#configDir");
 const planningFeishuUrlInput = document.querySelector("#planningFeishuUrl");
 const aiStatusText = document.querySelector("#aiStatusText");
 const aiProviderSelect = document.querySelector("#aiProvider");
+const targetTablesSummary = document.querySelector("#targetTablesSummary");
+const targetDialog = document.querySelector("#targetDialog");
+const tableSearchInput = document.querySelector("#tableSearch");
+const tableList = document.querySelector("#tableList");
+const commonTablesInput = document.querySelector("#commonTablesInput");
 
 const aiProviderDefaults = {
   chatgpt: {
@@ -55,7 +59,7 @@ const sampleManifest = {
   run_root: ".runs",
   planning_sources: [
     {
-      id: "uploaded-planning",
+      id: "sample-planning",
       kind: "local_excel",
       path: "fixtures/sample-planning.xlsx",
       role: "planning"
@@ -73,6 +77,7 @@ const sampleManifest = {
       recursive: false
     }
   ],
+  target_tables: ["shop_pack_config"],
   habit_store: ".knowledge/habits.jsonl",
   ai: {
     provider: "chatgpt",
@@ -85,16 +90,44 @@ const sampleManifest = {
 };
 
 let lastPatch = null;
-let latestSchemaPath = localStorage.getItem("aiMetaAgent.latestSchemaPath") || "";
-let draftMode = localStorage.getItem("aiMetaAgent.draftMode") || "stub";
-let aiProvider = localStorage.getItem("aiMetaAgent.aiProvider") || "chatgpt";
+let latestSchemaPath = localStorage.getItem(storageKey("latestSchemaPath")) || "";
+let draftMode = localStorage.getItem(storageKey("draftMode")) || "stub";
+let aiProvider = localStorage.getItem(storageKey("aiProvider")) || "chatgpt";
 let latestAiStatus = null;
+let tableOptions = [];
+let selectedTargetTables = readJsonStorage("targetTables", []);
+let pendingTargetSelection = new Set();
 
 const rememberedFields = [
   ["configDir", configDirInput],
-  ["targetTable", tableNameInput],
   ["planningFeishuUrl", planningFeishuUrlInput]
 ];
+
+function storageKey(name) {
+  return `aiMetaAgent.${name}`;
+}
+
+function readJsonStorage(name, fallback) {
+  try {
+    const value = localStorage.getItem(storageKey(name));
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonStorage(name, value) {
+  localStorage.setItem(storageKey(name), JSON.stringify(value));
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
 
 function setStatus(text, state = "") {
   statusEl.textContent = text;
@@ -103,7 +136,7 @@ function setStatus(text, state = "") {
 
 function setDraftMode(mode) {
   draftMode = mode === "real" ? "real" : "stub";
-  localStorage.setItem("aiMetaAgent.draftMode", draftMode);
+  localStorage.setItem(storageKey("draftMode"), draftMode);
   for (const button of document.querySelectorAll("[data-ai-mode]")) {
     button.classList.toggle("active", button.dataset.aiMode === draftMode);
   }
@@ -112,7 +145,7 @@ function setDraftMode(mode) {
 function setAiProvider(provider) {
   aiProvider = aiProviderDefaults[provider] ? provider : "chatgpt";
   aiProviderSelect.value = aiProvider;
-  localStorage.setItem("aiMetaAgent.aiProvider", aiProvider);
+  localStorage.setItem(storageKey("aiProvider"), aiProvider);
   latestAiStatus = null;
   loadAiStatus();
 }
@@ -140,33 +173,214 @@ function showTab(name) {
   document.querySelector(`#${name}Tab`).classList.add("active");
 }
 
-function readFileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result);
-      resolve(dataUrl.slice(dataUrl.indexOf(",") + 1));
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+function normalizeTableNames(values) {
+  const result = [];
+  const seen = new Set();
+  for (const value of values || []) {
+    const name = String(value || "").trim();
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      result.push(name);
+    }
+  }
+  return result;
+}
+
+function parseTableListText(text) {
+  return normalizeTableNames(String(text || "").split(/[\n,，;；]+/));
+}
+
+function commonTableNames() {
+  return parseTableListText(commonTablesInput.value);
+}
+
+function saveCommonTables() {
+  const names = commonTableNames();
+  commonTablesInput.value = names.join("\n");
+  writeJsonStorage("commonTables", names);
+  for (const name of names) {
+    if (!tableOptions.some((table) => table.name === name)) {
+      tableOptions.push({ name, source: "common" });
+    }
+  }
+  tableOptions.sort((left, right) => left.name.localeCompare(right.name));
+  renderTableList();
+}
+
+function selectedTableOrder() {
+  const optionNames = tableOptions.map((item) => item.name);
+  const ordered = optionNames.filter((name) => pendingTargetSelection.has(name));
+  for (const name of pendingTargetSelection) {
+    if (!ordered.includes(name)) ordered.push(name);
+  }
+  return ordered;
+}
+
+function updateTargetSummary() {
+  if (!selectedTargetTables.length) {
+    targetTablesSummary.textContent = "尚未选择。请先扫描配置目录，再选择本次活动的主要关联表。";
+    targetTablesSummary.classList.add("empty");
+    return;
+  }
+  targetTablesSummary.classList.remove("empty");
+  targetTablesSummary.innerHTML = selectedTargetTables
+    .map((name) => `<span class="target-chip">${escapeHtml(name)}</span>`)
+    .join("");
+}
+
+function applyTargetTablesToManifest() {
+  try {
+    const manifest = JSON.parse(manifestText.value);
+    if (selectedTargetTables.length) {
+      manifest.target_tables = selectedTargetTables;
+    } else {
+      delete manifest.target_tables;
+    }
+    manifestText.value = JSON.stringify(manifest, null, 2);
+  } catch {
+    // Keep the user's manual manifest edits visible.
+  }
+}
+
+function syncTargetsFromManifest() {
+  try {
+    const manifest = JSON.parse(manifestText.value);
+    selectedTargetTables = normalizeTableNames(manifest.target_tables || selectedTargetTables);
+    writeJsonStorage("targetTables", selectedTargetTables);
+    updateTargetSummary();
+  } catch {
+    updateTargetSummary();
+  }
+}
+
+function fallbackTableOptionsFromManifest() {
+  try {
+    const manifest = JSON.parse(manifestText.value);
+    const names = [
+      ...Object.keys(manifest.config_tables || {}),
+      ...(manifest.target_tables || []),
+      ...commonTableNames()
+    ];
+    return normalizeTableNames(names).map((name) => ({ name, source: "manifest" }));
+  } catch {
+    return commonTableNames().map((name) => ({ name, source: "common" }));
+  }
+}
+
+async function loadTableOptions({ silent = false } = {}) {
+  try {
+    const response = await fetch("/api/table-options");
+    if (!response.ok) throw new Error("no scan result");
+    const data = await response.json();
+    const backendTables = (data.tables || []).map((table) => ({
+      name: table.name,
+      source: table.source_file || table.source || "",
+      field_count: table.field_count || 0,
+      primary_key: table.primary_key || []
+    }));
+    const commonOnly = commonTableNames()
+      .filter((name) => !backendTables.some((table) => table.name === name))
+      .map((name) => ({ name, source: "common" }));
+    tableOptions = [...commonOnly, ...backendTables].sort((left, right) => left.name.localeCompare(right.name));
+  } catch (error) {
+    tableOptions = fallbackTableOptionsFromManifest();
+    if (!silent) {
+      setStatus(`表列表未刷新：${error.message}`, "error");
+    }
+  }
+  renderTableList();
+}
+
+function renderTableList() {
+  const query = tableSearchInput.value.trim().toLowerCase();
+  const common = new Set(commonTableNames());
+  const options = tableOptions.filter((table) => {
+    if (!query) return true;
+    return `${table.name} ${table.source || ""}`.toLowerCase().includes(query);
   });
+
+  if (!options.length) {
+    tableList.innerHTML = `
+      <div class="empty-state">
+        还没有可选表。先点“扫描配置目录”，或者在“常用表列表”里粘贴 sheet 名后保存。
+      </div>
+    `;
+    return;
+  }
+
+  tableList.innerHTML = options
+    .map((table) => {
+      const checked = pendingTargetSelection.has(table.name) ? "checked" : "";
+      const commonBadge = common.has(table.name) ? '<span class="badge">常用</span>' : "";
+      const pk = table.primary_key?.length ? `主键：${table.primary_key.join(", ")}` : "主键：待识别";
+      const fields = table.field_count ? `字段：${table.field_count}` : "";
+      return `
+        <label class="table-option">
+          <input type="checkbox" value="${escapeHtml(table.name)}" ${checked} />
+          <span>
+            <strong>${escapeHtml(table.name)}</strong>
+            ${commonBadge}
+            <small>${escapeHtml([pk, fields].filter(Boolean).join(" · "))}</small>
+            ${table.source ? `<small>${escapeHtml(table.source)}</small>` : ""}
+          </span>
+        </label>
+      `;
+    })
+    .join("");
+}
+
+function openTargetDialog() {
+  pendingTargetSelection = new Set(selectedTargetTables);
+  tableSearchInput.value = "";
+  commonTablesInput.value = readJsonStorage("commonTables", []).join("\n");
+  targetDialog.hidden = false;
+  loadTableOptions({ silent: true }).then(() => tableSearchInput.focus());
+}
+
+function closeTargetDialog() {
+  targetDialog.hidden = true;
+}
+
+function saveTargetSelection() {
+  selectedTargetTables = selectedTableOrder();
+  writeJsonStorage("targetTables", selectedTargetTables);
+  updateTargetSummary();
+  applyTargetTablesToManifest();
+  closeTargetDialog();
+}
+
+function saveRememberedInputs() {
+  for (const [name, input] of rememberedFields) {
+    const value = input.value.trim();
+    if (value) {
+      localStorage.setItem(storageKey(name), value);
+    } else {
+      localStorage.removeItem(storageKey(name));
+    }
+  }
+}
+
+function restoreRememberedInputs() {
+  for (const [name, input] of rememberedFields) {
+    const value = localStorage.getItem(storageKey(name));
+    if (value) input.value = value;
+  }
 }
 
 async function buildPayload() {
   const manifest = JSON.parse(manifestText.value);
   applyAiProvider(manifest);
-  const files = [];
-  const planning = document.querySelector("#planningFile").files[0];
   const planningFeishuUrl = planningFeishuUrlInput.value.trim();
-  const config = document.querySelector("#configFile").files[0];
   const configDir = configDirInput.value.trim();
-  const targetTable = tableNameInput.value.trim();
   saveRememberedInputs();
+
   if (configDir) {
     manifest.config_roots = [{ path: configDir, recursive: true }];
   }
-  if (targetTable) {
-    manifest.target_tables = [targetTable];
+  if (selectedTargetTables.length) {
+    manifest.target_tables = selectedTargetTables;
+  } else {
+    delete manifest.target_tables;
   }
   if (planningFeishuUrl) {
     manifest.planning_sources = [
@@ -178,17 +392,24 @@ async function buildPayload() {
         role: "planning"
       }
     ];
-  } else if (planning) {
-    files.push({ role: "planning", name: planning.name, base64: await readFileAsBase64(planning) });
   }
-  if (config) {
-    files.push({ role: `config:${targetTable || "shop_pack_config"}`, name: config.name, base64: await readFileAsBase64(config) });
+  return { manifest, files: [], useLatestSchema: Boolean(latestSchemaPath) };
+}
+
+function ensureTargetTablesSelected() {
+  if (!selectedTargetTables.length) {
+    throw new Error("请先点击“选择配置表”，勾选本次活动的主要关联表");
   }
-  return { manifest, files, useLatestSchema: Boolean(latestSchemaPath) };
+}
+
+function ensurePlanningSource(manifest) {
+  if (planningFeishuUrlInput.value.trim()) return;
+  if (Array.isArray(manifest.planning_sources) && manifest.planning_sources.length) return;
+  throw new Error("请先填写飞书规划链接，或在 Manifest 里配置 planning_sources");
 }
 
 async function callApi(route, payload) {
-  setStatus("处理中", "busy");
+  setStatus("处理中...", "busy");
   const response = await fetch(route, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -253,13 +474,13 @@ function compactSchemaResult(data) {
 function rememberSchemaPath(schemaPath) {
   if (!schemaPath) return;
   latestSchemaPath = schemaPath;
-  localStorage.setItem("aiMetaAgent.latestSchemaPath", schemaPath);
+  localStorage.setItem(storageKey("latestSchemaPath"), schemaPath);
   try {
     const manifest = JSON.parse(manifestText.value);
     manifest.schema_path = schemaPath;
     manifestText.value = JSON.stringify(manifest, null, 2);
   } catch {
-    // Leave invalid manual edits visible so the user can correct them.
+    // Keep invalid manual edits visible so the user can correct them.
   }
 }
 
@@ -269,6 +490,7 @@ async function loadLatestSchema() {
     if (!response.ok) return;
     const data = await response.json();
     rememberSchemaPath(data.schema_path);
+    await loadTableOptions({ silent: true });
   } catch {
     // The first run may not have a schema scan yet.
   }
@@ -282,30 +504,6 @@ async function runAction(action) {
   }
 }
 
-function storageKey(name) {
-  return `aiMetaAgent.${name}`;
-}
-
-function saveRememberedInputs() {
-  for (const [name, input] of rememberedFields) {
-    const value = input.value.trim();
-    if (value) {
-      localStorage.setItem(storageKey(name), value);
-    } else {
-      localStorage.removeItem(storageKey(name));
-    }
-  }
-}
-
-function restoreRememberedInputs() {
-  for (const [name, input] of rememberedFields) {
-    const value = localStorage.getItem(storageKey(name));
-    if (value) {
-      input.value = value;
-    }
-  }
-}
-
 for (const [, input] of rememberedFields) {
   input.addEventListener("input", saveRememberedInputs);
   input.addEventListener("change", saveRememberedInputs);
@@ -313,9 +511,11 @@ for (const [, input] of rememberedFields) {
 
 document.querySelector("#loadSample").addEventListener("click", () => {
   latestSchemaPath = "";
-  localStorage.removeItem("aiMetaAgent.latestSchemaPath");
-  tableNameInput.value = "shop_pack_config";
+  localStorage.removeItem(storageKey("latestSchemaPath"));
+  selectedTargetTables = ["shop_pack_config"];
+  writeJsonStorage("targetTables", selectedTargetTables);
   manifestText.value = JSON.stringify(sampleManifest, null, 2);
+  updateTargetSummary();
 });
 
 for (const button of document.querySelectorAll("[data-ai-mode]")) {
@@ -323,30 +523,64 @@ for (const button of document.querySelectorAll("[data-ai-mode]")) {
 }
 
 aiProviderSelect.addEventListener("change", () => setAiProvider(aiProviderSelect.value));
+manifestText.addEventListener("change", syncTargetsFromManifest);
+
+document.querySelector("#openTargetDialog").addEventListener("click", openTargetDialog);
+document.querySelector("#closeTargetDialog").addEventListener("click", closeTargetDialog);
+document.querySelector("#cancelTargetSelection").addEventListener("click", closeTargetDialog);
+document.querySelector("#saveTargetSelection").addEventListener("click", saveTargetSelection);
+document.querySelector("#clearTargetSelection").addEventListener("click", () => {
+  pendingTargetSelection.clear();
+  renderTableList();
+});
+document.querySelector("#refreshTableOptions").addEventListener("click", () => loadTableOptions());
+document.querySelector("#saveCommonTables").addEventListener("click", saveCommonTables);
+document.querySelector("#selectCommonTables").addEventListener("click", () => {
+  for (const name of commonTableNames()) {
+    pendingTargetSelection.add(name);
+  }
+  renderTableList();
+});
+tableSearchInput.addEventListener("input", renderTableList);
+tableList.addEventListener("change", (event) => {
+  const checkbox = event.target;
+  if (!(checkbox instanceof HTMLInputElement) || checkbox.type !== "checkbox") return;
+  if (checkbox.checked) {
+    pendingTargetSelection.add(checkbox.value);
+  } else {
+    pendingTargetSelection.delete(checkbox.value);
+  }
+});
+targetDialog.addEventListener("click", (event) => {
+  if (event.target === targetDialog) closeTargetDialog();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !targetDialog.hidden) closeTargetDialog();
+});
 
 document.querySelector("#schemaScanBtn").addEventListener("click", () => runAction(async () => {
   const payload = await buildPayload();
   const data = await callApi("/api/schema-scan", payload);
   rememberSchemaPath(data.artifact?.schemaDraft?.path || parseStdout(data).schema_draft);
+  await loadTableOptions({ silent: true });
   resultText.textContent = JSON.stringify(compactSchemaResult(data), null, 2);
   showTab("result");
+  if (!selectedTargetTables.length) openTargetDialog();
 }));
 
 document.querySelector("#analyzeBtn").addEventListener("click", () => runAction(async () => {
-  if (!tableNameInput.value.trim()) {
-    throw new Error("请先填写目标配置表名（sheet 名）");
-  }
+  ensureTargetTablesSelected();
   const payload = await buildPayload();
+  ensurePlanningSource(payload.manifest);
   const data = await callApi("/api/analyze", payload);
   resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
   showTab("result");
 }));
 
 document.querySelector("#draftBtn").addEventListener("click", () => runAction(async () => {
-  if (!tableNameInput.value.trim()) {
-    throw new Error("请先填写目标配置表名（sheet 名）");
-  }
+  ensureTargetTablesSelected();
   const payload = await buildPayload();
+  ensurePlanningSource(payload.manifest);
   if (draftMode === "real") {
     const aiStatus = latestAiStatus?.ready ? latestAiStatus : await loadAiStatus();
     if (!aiStatus?.ready) {
@@ -386,7 +620,14 @@ for (const button of document.querySelectorAll(".tab")) {
 }
 
 manifestText.value = JSON.stringify(sampleManifest, null, 2);
+restoreRememberedInputs();
+const storedCommonTables = readJsonStorage("commonTables", []);
+commonTablesInput.value = storedCommonTables.join("\n");
+if (!selectedTargetTables.length) {
+  selectedTargetTables = normalizeTableNames(sampleManifest.target_tables);
+}
+applyTargetTablesToManifest();
 setAiProvider(aiProvider);
 setDraftMode(draftMode);
-restoreRememberedInputs();
+updateTargetSummary();
 loadLatestSchema();

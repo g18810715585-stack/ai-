@@ -141,6 +141,27 @@ function latestSchemaDraft(projectRoot) {
   return candidates[0]?.filePath || null;
 }
 
+function latestSchemaScan(projectRoot) {
+  const runsDir = path.join(projectRoot, ".runs");
+  const pointer = path.join(runsDir, "LATEST_SCHEMA_SCAN.txt");
+  if (fs.existsSync(pointer)) {
+    const value = fs.readFileSync(pointer, "utf8").trim();
+    const reportPath = path.join(value, "schema-scan.json");
+    if (value && fs.existsSync(reportPath)) return reportPath;
+  }
+  if (!fs.existsSync(runsDir)) return null;
+  const candidates = fs.readdirSync(runsDir, { withFileTypes: true })
+    .filter((item) => item.isDirectory() && item.name.startsWith("schema-scan-"))
+    .map((item) => {
+      const filePath = path.join(runsDir, item.name, "schema-scan.json");
+      const stat = fs.existsSync(filePath) ? fs.statSync(filePath) : null;
+      return stat ? { filePath, time: stat.mtimeMs } : null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.time - left.time);
+  return candidates[0]?.filePath || null;
+}
+
 function countBy(items, field) {
   const counts = {};
   for (const item of items || []) {
@@ -148,6 +169,55 @@ function countBy(items, field) {
     counts[value] = (counts[value] || 0) + 1;
   }
   return counts;
+}
+
+function loadCommonTables(projectRoot) {
+  const candidates = [
+    path.join(projectRoot, ".knowledge", "common-tables.json"),
+    path.join(projectRoot, "config", "common-tables.json")
+  ];
+  for (const filePath of candidates) {
+    const data = maybeReadJson(filePath);
+    if (!data) continue;
+    if (Array.isArray(data)) return data.map((name) => String(name)).filter(Boolean);
+    if (Array.isArray(data.tables)) return data.tables.map((item) => String(item?.name || item)).filter(Boolean);
+  }
+  return [];
+}
+
+function tableOptions(projectRoot) {
+  const schemaPath = latestSchemaDraft(projectRoot);
+  const scanPath = latestSchemaScan(projectRoot);
+  const schema = maybeReadJson(schemaPath);
+  const scan = maybeReadJson(scanPath);
+  const sourceByName = new Map();
+  for (const [name, table] of Object.entries(scan?.tables || {})) {
+    sourceByName.set(name, table);
+  }
+  const names = new Set([
+    ...Object.keys(schema?.tables || {}),
+    ...Object.keys(scan?.tables || {}),
+    ...loadCommonTables(projectRoot)
+  ]);
+  const tables = [...names].sort((left, right) => left.localeCompare(right)).map((name) => {
+    const schemaTable = schema?.tables?.[name] || {};
+    const scanTable = sourceByName.get(name) || {};
+    const fields = schemaTable.fields || scanTable.fields || {};
+    return {
+      name,
+      sheet: schemaTable.sheet || scanTable.sheet || name,
+      source_file: scanTable.source_file || null,
+      primary_key: schemaTable.primary_key || scanTable.primary_key || [],
+      field_count: Object.keys(fields).length
+    };
+  });
+  return {
+    schema_path: schemaPath,
+    scan_path: scanPath,
+    table_count: tables.length,
+    common_tables: loadCommonTables(projectRoot),
+    tables
+  };
 }
 
 function summarizeSchemaDraft(filePath) {
@@ -277,6 +347,10 @@ async function handleApi(req, res, projectRoot) {
     }
     const schema = summarizeSchemaDraft(schemaPath);
     sendJson(res, 200, { schema_path: schemaPath, schema });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/table-options") {
+    sendJson(res, 200, tableOptions(projectRoot));
     return;
   }
   if (req.method !== "POST") {

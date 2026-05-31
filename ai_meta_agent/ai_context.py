@@ -6,6 +6,27 @@ from .habits import habit_context
 from .models import Habit, Manifest, SchemaBundle, WorkbookIR
 
 
+def _relationship_candidates(schema: SchemaBundle) -> list[dict[str, str]]:
+    primary_by_field: dict[str, str] = {}
+    for table_name, table in schema.tables.items():
+        for field in table.primary_key:
+            primary_by_field[field] = table_name
+
+    candidates: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for table_name, table in schema.tables.items():
+        for field in table.fields:
+            target_table = primary_by_field.get(field)
+            if not target_table or target_table == table_name:
+                continue
+            key = (table_name, field, target_table)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append({"from_table": table_name, "field": field, "to_table": target_table})
+    return candidates
+
+
 def build_minimal_context(manifest: Manifest, schema: SchemaBundle, workbooks: list[WorkbookIR], habits: list[Habit]) -> dict[str, Any]:
     table_names = list(schema.tables.keys())
     return {
@@ -33,6 +54,7 @@ def build_minimal_context(manifest: Manifest, schema: SchemaBundle, workbooks: l
                 for table_name, table in schema.tables.items()
             },
             "risk": schema.risk.model_dump(),
+            "relationship_candidates": _relationship_candidates(schema),
         },
         "workbooks": [
             {
