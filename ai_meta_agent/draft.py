@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ from openpyxl import load_workbook
 
 from .io_utils import write_json, write_text
 from .models import Manifest, Patch, PatchOperation, SchemaBundle, SourceRef
+
+DEFAULT_AI_TIMEOUT_SECONDS = 240
 
 AI_PROVIDERS = {
     "chatgpt": {
@@ -239,9 +242,14 @@ def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: 
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
+    timeout = int(os.environ.get("AI_REQUEST_TIMEOUT_SECONDS", DEFAULT_AI_TIMEOUT_SECONDS))
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except (TimeoutError, socket.timeout) as exc:
+        raise RuntimeError(
+            f"{runtime['label']} 请求超时：等待 {timeout} 秒仍未返回。工具已压缩上下文；如果仍失败，可换更快模型或设置 AI_REQUEST_TIMEOUT_SECONDS=360。"
+        ) from exc
     except urllib.error.HTTPError as exc:
         message = exc.read().decode("utf-8", errors="replace")[:1000]
         raise RuntimeError(f"{runtime['label']} 请求失败：HTTP {exc.code} {message}") from exc

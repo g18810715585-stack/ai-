@@ -221,6 +221,29 @@ class WorkflowTests(unittest.TestCase):
             self.assertTrue((tmp / ".knowledge" / "case_examples.jsonl").exists())
             self.assertIn("价格字段", json.dumps(case, ensure_ascii=False))
 
+    def test_patch_operation_accepts_string_source_ref_from_ai(self) -> None:
+        patch_obj = Patch.model_validate(
+            {
+                "patch_id": "patch_string_ref",
+                "project": "unit-sample",
+                "operations": [
+                    {
+                        "op": "insert",
+                        "target_table": "activity",
+                        "rows": [{"id": 5805}],
+                        "source_ref": "feishu-planning,2026年5月航海节活动,row 7",
+                        "reason": "ai returned source_ref as text",
+                        "confidence": 0.75,
+                    }
+                ],
+            }
+        )
+
+        ref = patch_obj.operations[0].source_ref
+        self.assertEqual(ref.workbook, "feishu-planning")
+        self.assertEqual(ref.sheet, "2026年5月航海节活动")
+        self.assertEqual(ref.row, 7)
+
     def test_teach_experience_writes_local_knowledge(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)

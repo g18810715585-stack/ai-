@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
@@ -114,6 +115,20 @@ class PatchOperation(BaseModel):
     confidence: float = Field(ge=0, le=1)
     risk_level: Literal["low", "medium", "high"] = "medium"
     needs_confirmation: bool = True
+
+    @field_validator("source_ref", mode="before")
+    @classmethod
+    def coerce_source_ref(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            parts = [part.strip() for part in re.split(r"[,，|]", value) if part.strip()]
+            row_match = re.search(r"\brows?\s*(\d+)", value, flags=re.IGNORECASE)
+            return {
+                "workbook": parts[0] if parts else value[:80],
+                "sheet": parts[1] if len(parts) > 1 else None,
+                "row": int(row_match.group(1)) if row_match else None,
+                "field": value[:160],
+            }
+        return value
 
     @model_validator(mode="after")
     def validate_payload(self) -> "PatchOperation":

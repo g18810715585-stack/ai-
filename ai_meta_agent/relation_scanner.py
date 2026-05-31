@@ -601,13 +601,33 @@ def _relation_markdown(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def compact_relationship_context(result: dict[str, Any], limit: int = 80) -> dict[str, Any]:
+def compact_relationship_context(result: dict[str, Any], limit: int = 45) -> dict[str, Any]:
+    relations = []
+    for relation in (result.get("relations") or [])[:limit]:
+        evidence = relation.get("evidence") or {}
+        relations.append(
+            {
+                "from_table": relation.get("from_table"),
+                "from_field": relation.get("from_field"),
+                "to_table": relation.get("to_table"),
+                "to_field": relation.get("to_field"),
+                "relation_type": relation.get("relation_type"),
+                "confidence": relation.get("confidence"),
+                "risk": relation.get("risk"),
+                "hop": relation.get("hop"),
+                "evidence": {
+                    "hit_rate": evidence.get("hit_rate"),
+                    "hit_count": evidence.get("hit_count"),
+                    "sample_values": (evidence.get("sample_values") or [])[:5],
+                },
+            }
+        )
     return {
         "version": result.get("version"),
         "target_tables": result.get("target_tables", []),
         "recommended_tables": result.get("recommended_tables", []),
         "summary": result.get("summary", {}),
-        "relations": result.get("relations", [])[:limit],
+        "relations": relations,
         "ai_review": result.get("ai_review"),
     }
 

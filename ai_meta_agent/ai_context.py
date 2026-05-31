@@ -6,6 +6,144 @@ from .habits import habit_context
 from .models import Habit, Manifest, SchemaBundle, WorkbookIR
 
 
+def _truncate(value: Any, limit: int = 300) -> Any:
+    if isinstance(value, str):
+        return value if len(value) <= limit else f"{value[:limit]}..."
+    return value
+
+
+def _compact_row(row: dict[str, Any], limit: int = 60) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key, value in row.items():
+        if key == "__row":
+            compact[key] = value
+            continue
+        label = str(key or "").strip()
+        if not label or value in (None, ""):
+            continue
+        compact[label] = _truncate(value, 180)
+        if len(compact) >= limit:
+            break
+    return compact
+
+
+def _compact_workbooks(workbooks: list[WorkbookIR]) -> list[dict[str, Any]]:
+    result = []
+    for workbook in workbooks:
+        sheets = []
+        for sheet in workbook.sheets:
+            headers = [str(header).strip() for header in sheet.headers if str(header).strip()]
+            sheets.append(
+                {
+                    "name": sheet.name,
+                    "max_row": sheet.max_row,
+                    "max_column": sheet.max_column,
+                    "header_row": sheet.header_row,
+                    "headers": headers[:120],
+                    "hidden_rows": sheet.hidden_rows[:20],
+                    "hidden_columns": sheet.hidden_columns[:20],
+                    "merged_ranges": sheet.merged_ranges[:20],
+                    "sample_rows": [_compact_row(row) for row in sheet.sample_rows[:12]],
+                }
+            )
+        result.append(
+            {
+                "source_id": workbook.source_id,
+                "source_type": workbook.source_type,
+                "path": workbook.path,
+                "url": workbook.url,
+                "sheets": sheets,
+            }
+        )
+    return result
+
+
+def _compact_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "mapping_id": mapping.get("mapping_id"),
+        "source_aliases": (mapping.get("source_aliases") or [])[:8],
+        "matched_aliases": (mapping.get("matched_aliases") or [])[:8],
+        "target_table": mapping.get("target_table"),
+        "target_field": mapping.get("target_field"),
+        "target_field_exists": mapping.get("target_field_exists"),
+        "confidence": mapping.get("confidence"),
+        "evidence": [_truncate(item, 160) for item in (mapping.get("evidence") or [])[:2]],
+    }
+
+
+def _compact_rule(rule: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "rule_id": rule.get("rule_id") or rule.get("experience_id"),
+        "title": _truncate(rule.get("title") or rule.get("summary_title") or rule.get("name"), 120),
+        "text": _truncate(rule.get("text") or rule.get("rule") or rule.get("content"), 500),
+        "scenario_tags": (rule.get("scenario_tags") or [])[:8],
+        "applies_to_tables": (rule.get("applies_to_tables") or [])[:12],
+        "confidence": rule.get("confidence"),
+        "match_score": rule.get("match_score"),
+        "evidence": [_truncate(item, 120) for item in (rule.get("evidence") or [])[:2]],
+    }
+
+
+def _compact_template(template: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "template_id": template.get("template_id"),
+        "name": template.get("name"),
+        "target_tables": (template.get("target_tables") or [])[:16],
+        "relation_chain": (template.get("relation_chain") or [])[:16],
+        "required_fields": template.get("required_fields") or {},
+        "confidence": template.get("confidence"),
+        "match_score": template.get("match_score"),
+    }
+
+
+def _compact_case(case: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "case_id": case.get("case_id"),
+        "decision": case.get("decision"),
+        "target_tables": (case.get("target_tables") or [])[:12],
+        "operation_count": case.get("operation_count"),
+        "correction": _truncate(case.get("correction") or case.get("note"), 400),
+        "lessons": [_truncate(item, 160) for item in (case.get("case_review", {}).get("lessons") or [])[:5]],
+        "match_score": case.get("match_score"),
+    }
+
+
+def _compact_config_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "activity_type": plan.get("activity_type"),
+        "activity_template_id": plan.get("activity_template_id"),
+        "confidence": plan.get("confidence"),
+        "current_target_tables": plan.get("current_target_tables", []),
+        "recommended_target_tables": plan.get("recommended_target_tables", [])[:16],
+        "auto_included_target_tables": plan.get("auto_included_target_tables", []),
+        "all_recommended_tables": plan.get("all_recommended_tables", [])[:24],
+        "relation_chain": plan.get("relation_chain", [])[:16],
+        "required_fields": plan.get("required_fields", {}),
+        "matched_field_mappings": [_compact_mapping(item) for item in (plan.get("matched_field_mappings") or [])[:24]],
+        "matched_rules": [_compact_rule(item) for item in (plan.get("matched_rules") or [])[:10]],
+        "similar_cases": [_compact_case(item) for item in (plan.get("similar_cases") or [])[:5]],
+        "missing_information": [_truncate(item, 180) for item in (plan.get("missing_information") or [])[:10]],
+        "pending_confirmations": (plan.get("pending_confirmations") or [])[:20],
+        "planning_signals": {
+            "sheet_names": (plan.get("planning_signals", {}).get("sheet_names") or [])[:12],
+            "headers": (plan.get("planning_signals", {}).get("headers") or [])[:80],
+        },
+        "safety": plan.get("safety"),
+    }
+
+
+def _compact_experience(experience: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not experience:
+        return None
+    return {
+        "matched_activity_templates": [_compact_template(item) for item in experience.get("matched_activity_templates", [])[:5]],
+        "matched_field_mappings": [_compact_mapping(item) for item in experience.get("matched_field_mappings", [])[:30]],
+        "matched_rules": [_compact_rule(item) for item in experience.get("matched_rules", [])[:12]],
+        "similar_cases": [_compact_case(item) for item in experience.get("similar_cases", [])[:6]],
+        "config_plan": _compact_config_plan(experience.get("config_plan") or {}),
+    }
+
+
 def _relationship_candidates(schema: SchemaBundle) -> list[dict[str, str]]:
     primary_by_field: dict[str, str] = {}
     for table_name, table in schema.tables.items():
@@ -67,44 +205,15 @@ def build_minimal_context(
             "risk": schema.risk.model_dump(),
             "relationship_candidates": _relationship_candidates(schema),
         },
-        "workbooks": [
-            {
-                "source_id": workbook.source_id,
-                "source_type": workbook.source_type,
-                "path": workbook.path,
-                "url": workbook.url,
-                "sheets": [
-                    {
-                        "name": sheet.name,
-                        "max_row": sheet.max_row,
-                        "max_column": sheet.max_column,
-                        "header_row": sheet.header_row,
-                        "headers": sheet.headers,
-                        "hidden_rows": sheet.hidden_rows[:20],
-                        "hidden_columns": sheet.hidden_columns[:20],
-                        "merged_ranges": sheet.merged_ranges[:20],
-                        "sample_rows": sheet.sample_rows[:20],
-                    }
-                    for sheet in workbook.sheets
-                ],
-            }
-            for workbook in workbooks
-        ],
+        "workbooks": _compact_workbooks(workbooks),
         "matched_habits": habit_context(habits),
         "target_tables": table_names,
     }
     if item_resolution:
         context["planning_item_resolution"] = item_resolution
-    if experience:
-        context.update(
-            {
-                "matched_activity_templates": experience.get("matched_activity_templates", []),
-                "matched_field_mappings": experience.get("matched_field_mappings", []),
-                "matched_rules": experience.get("matched_rules", []),
-                "similar_cases": experience.get("similar_cases", []),
-                "config_plan": experience.get("config_plan", {}),
-            }
-        )
+    compact_experience = _compact_experience(experience)
+    if compact_experience:
+        context.update(compact_experience)
     return context
 
 
