@@ -659,7 +659,7 @@ async function buildPayload() {
       id: "feishu-value-table",
       kind: "feishu",
       url: itemBaseFeishuUrl,
-      range: "A1:ZZ3000",
+      range: "A1:AZ3000",
       role: "item_base"
     });
   }

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from openpyxl import Workbook, load_workbook
@@ -26,7 +27,7 @@ from ai_meta_agent.experience import (
     teach_experience,
     update_saved_experience,
 )
-from ai_meta_agent.feishu import FeishuSourcePayload
+from ai_meta_agent.feishu import FeishuSourcePayload, read_feishu_sheet
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
 from ai_meta_agent.io_utils import read_json, write_json
 from ai_meta_agent.item_resolution import resolve_planning_items
@@ -590,6 +591,37 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(sheet.name, "活动规划")
         self.assertEqual(sheet.headers[:2], ["section", "content"])
         self.assertIn("活动时间", sheet.sample_rows[0]["content"])
+
+    def test_feishu_sheet_read_falls_back_to_chunks_when_payload_is_too_large(self) -> None:
+        calls: list[str] = []
+
+        def fake_run_lark_cli(_lark_cli: str, args: list[str], _label: str, _cwd: Path) -> dict[str, Any]:
+            if args[:3] == ["wiki", "spaces", "get_node"]:
+                return {"data": {"node": {"obj_type": "sheet", "obj_token": "sheet-token", "title": "value-table"}}}
+            range_name = args[args.index("--range") + 1]
+            calls.append(range_name)
+            if range_name == "A1:ZZ1200":
+                raise RuntimeError("API call failed: [90221] data exceeded 10485760 bytes.")
+            values_by_range = {
+                "A1:ZZ500": [["item_name", "reward_type", "content_id"], ["ruby", 7, 323]],
+                "A501:ZZ1000": [["gold", 8, 999]],
+                "A1001:ZZ1200": [],
+            }
+            return {"data": {"valueRange": {"range": range_name, "values": values_by_range[range_name]}}}
+
+        with tempfile.TemporaryDirectory() as raw:
+            with patch("ai_meta_agent.feishu.resolve_lark_cli", return_value="lark-cli.exe"):
+                with patch("ai_meta_agent.feishu.run_lark_cli", side_effect=fake_run_lark_cli):
+                    payload = read_feishu_sheet(
+                        "https://rivergame.feishu.cn/wiki/demo?sheet=abc",
+                        Path(raw),
+                        range_name="A1:ZZ1200",
+                    )
+
+        self.assertEqual(calls, ["A1:ZZ1200", "A1:ZZ500", "A501:ZZ1000", "A1001:ZZ1200"])
+        self.assertEqual(payload.values[0], ["item_name", "reward_type", "content_id"])
+        self.assertIn(["gold", 8, 999], payload.values)
+        self.assertTrue(any("分块读取" in notice for notice in payload.notices))
 
     def test_planning_items_resolve_reward_type_and_id_from_value_table(self) -> None:
         manifest = Manifest.model_validate(
