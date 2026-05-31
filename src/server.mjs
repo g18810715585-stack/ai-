@@ -61,7 +61,10 @@ function serveStatic(req, res) {
     res.end("Not found");
     return;
   }
-  res.writeHead(200, { "Content-Type": contentType(filePath) });
+  res.writeHead(200, {
+    "Content-Type": contentType(filePath),
+    "Cache-Control": "no-store"
+  });
   fs.createReadStream(filePath).pipe(res);
 }
 
