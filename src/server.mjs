@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { aiRuntimeStatus, loadDotEnv } from "./env.mjs";
+import { buildPythonEnv } from "./python_env.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const staticRoot = path.join(__dirname, "static");
@@ -105,8 +106,7 @@ function materializeRequest(projectRoot, payload) {
 
 function runCore(projectRoot, args) {
   const python = resolvePython();
-  const env = { ...process.env };
-  env.PYTHONPATH = env.PYTHONPATH ? `${projectRoot}${path.delimiter}${env.PYTHONPATH}` : projectRoot;
+  const env = buildPythonEnv(projectRoot);
   const result = spawnSync(python, ["-m", "ai_meta_agent.cli", "--base-dir", projectRoot, ...args], {
     cwd: projectRoot,
     env,

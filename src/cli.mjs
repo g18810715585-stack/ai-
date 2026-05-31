@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadDotEnv } from "./env.mjs";
+import { buildPythonEnv } from "./python_env.mjs";
 import { startServer } from "./server.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,8 +34,7 @@ function resolvePython() {
 
 function runPython(args) {
   const python = resolvePython();
-  const env = { ...process.env };
-  env.PYTHONPATH = env.PYTHONPATH ? `${projectRoot}${path.delimiter}${env.PYTHONPATH}` : projectRoot;
+  const env = buildPythonEnv(projectRoot);
   const result = spawnSync(python, ["-m", "ai_meta_agent.cli", "--base-dir", projectRoot, ...args], {
     cwd: projectRoot,
     env,

@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { aiRuntimeStatus, loadDotEnv, normalizeAiProvider, parseDotEnv } from "../../src/env.mjs";
+import { buildPythonEnv } from "../../src/python_env.mjs";
 
 test("parseDotEnv handles comments, exports, and quotes", () => {
   const parsed = parseDotEnv(`
@@ -30,6 +31,13 @@ test("loadDotEnv does not override existing process values", () => {
   assert.equal(env.THIRD_API_KEY, "from-file");
   assert.deepEqual(result.loaded, ["THIRD_API_KEY"]);
   assert.deepEqual(result.skipped, ["TEST_API_KEY"]);
+});
+
+test("buildPythonEnv keeps Chinese stdout JSON in UTF-8", () => {
+  const env = buildPythonEnv("C:\\project", { PYTHONPATH: "C:\\old", PYTHONIOENCODING: "gbk" });
+  assert.equal(env.PYTHONPATH, `C:\\project${path.delimiter}C:\\old`);
+  assert.equal(env.PYTHONIOENCODING, "utf-8");
+  assert.equal(env.PYTHONUTF8, "1");
 });
 
 test("aiRuntimeStatus resolves company BI model choices", () => {

@@ -11,7 +11,7 @@
     "server": "node src/cli.mjs server",
     "analyze:sample": "node src/cli.mjs analyze --manifest fixtures/sample.manifest.json",
     "draft:sample": "node src/cli.mjs draft --manifest fixtures/sample.manifest.json --stub",
-    "check": "node --check src/cli.mjs && node --check src/server.mjs && node --check src/env.mjs && node --check src/ai_provider.mjs && node --check src/static/app.js",
+    "check": "node --check src/cli.mjs && node --check src/server.mjs && node --check src/env.mjs && node --check src/python_env.mjs && node --check src/ai_provider.mjs && node --check src/static/app.js",
     "test": "node --test tests/node/*.test.mjs && python -m unittest discover -s tests"
   },
   "engines": {
