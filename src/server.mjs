@@ -188,6 +188,10 @@ function loadCommonTables(projectRoot) {
   return [];
 }
 
+function isConfigTableName(name) {
+  return /^[A-Za-z][A-Za-z0-9_]*$/.test(String(name || ""));
+}
+
 function tableOptions(projectRoot) {
   const schemaPath = latestSchemaDraft(projectRoot);
   const scanPath = latestSchemaScan(projectRoot);
@@ -204,7 +208,7 @@ function tableOptions(projectRoot) {
     ...Object.keys(scan?.tables || {}),
     ...loadCommonTables(projectRoot)
   ]);
-  const tables = [...names].sort((left, right) => left.localeCompare(right)).map((name) => {
+  const tables = [...names].filter(isConfigTableName).sort((left, right) => left.localeCompare(right)).map((name) => {
     const schemaTable = schema?.tables?.[name] || {};
     const scanTable = sourceByName.get(name) || {};
     const fields = schemaTable.fields || scanTable.fields || {};
@@ -223,7 +227,7 @@ function tableOptions(projectRoot) {
     schema_path: schemaPath,
     scan_path: scanPath,
     table_count: tables.length,
-    common_tables: commonTables,
+    common_tables: commonTables.filter(isConfigTableName),
     tables
   };
 }

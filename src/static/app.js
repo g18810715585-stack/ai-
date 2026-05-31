@@ -188,12 +188,16 @@ function normalizeTableNames(values) {
   const seen = new Set();
   for (const value of values || []) {
     const name = String(value || "").trim();
-    if (name && !seen.has(name)) {
+    if (isConfigTableName(name) && !seen.has(name)) {
       seen.add(name);
       result.push(name);
     }
   }
   return result;
+}
+
+function isConfigTableName(name) {
+  return /^[A-Za-z][A-Za-z0-9_]*$/.test(String(name || ""));
 }
 
 function parseTableListText(text) {
@@ -287,13 +291,15 @@ async function loadTableOptions({ silent = false } = {}) {
       commonTablesInput.value = serverCommonTables.join("\n");
     }
     const commonSet = new Set([...serverCommonTables, ...commonTableNames()]);
-    const backendTables = (data.tables || []).map((table) => ({
-      name: table.name,
-      source: table.source_file || table.source || "",
-      field_count: table.field_count || 0,
-      primary_key: table.primary_key || [],
-      is_common: Boolean(table.is_common) || commonSet.has(table.name)
-    }));
+    const backendTables = (data.tables || [])
+      .filter((table) => isConfigTableName(table.name))
+      .map((table) => ({
+        name: table.name,
+        source: table.source_file || table.source || "",
+        field_count: table.field_count || 0,
+        primary_key: table.primary_key || [],
+        is_common: Boolean(table.is_common) || commonSet.has(table.name)
+      }));
     const commonOnly = [...commonSet]
       .filter((name) => !backendTables.some((table) => table.name === name))
       .map((name) => ({ name, source: "常用表", is_common: true }));
