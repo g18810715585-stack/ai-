@@ -190,6 +190,8 @@ function tableOptions(projectRoot) {
   const scanPath = latestSchemaScan(projectRoot);
   const schema = maybeReadJson(schemaPath);
   const scan = maybeReadJson(scanPath);
+  const commonTables = loadCommonTables(projectRoot);
+  const commonSet = new Set(commonTables);
   const sourceByName = new Map();
   for (const [name, table] of Object.entries(scan?.tables || {})) {
     sourceByName.set(name, table);
@@ -203,10 +205,13 @@ function tableOptions(projectRoot) {
     const schemaTable = schema?.tables?.[name] || {};
     const scanTable = sourceByName.get(name) || {};
     const fields = schemaTable.fields || scanTable.fields || {};
+    const isCommon = commonSet.has(name);
     return {
       name,
       sheet: schemaTable.sheet || scanTable.sheet || name,
       source_file: scanTable.source_file || null,
+      source: scanTable.source_file ? null : isCommon ? "常用表" : null,
+      is_common: isCommon,
       primary_key: schemaTable.primary_key || scanTable.primary_key || [],
       field_count: Object.keys(fields).length
     };
@@ -215,7 +220,7 @@ function tableOptions(projectRoot) {
     schema_path: schemaPath,
     scan_path: scanPath,
     table_count: tables.length,
-    common_tables: loadCommonTables(projectRoot),
+    common_tables: commonTables,
     tables
   };
 }

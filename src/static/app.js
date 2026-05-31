@@ -95,6 +95,7 @@ let draftMode = localStorage.getItem(storageKey("draftMode")) || "stub";
 let aiProvider = localStorage.getItem(storageKey("aiProvider")) || "chatgpt";
 let latestAiStatus = null;
 let tableOptions = [];
+let serverCommonTables = [];
 let selectedTargetTables = readJsonStorage("targetTables", []);
 let pendingTargetSelection = new Set();
 
@@ -272,15 +273,21 @@ async function loadTableOptions({ silent = false } = {}) {
     const response = await fetch("/api/table-options");
     if (!response.ok) throw new Error("no scan result");
     const data = await response.json();
+    serverCommonTables = normalizeTableNames(data.common_tables || []);
+    if (!commonTablesInput.value.trim() && serverCommonTables.length) {
+      commonTablesInput.value = serverCommonTables.join("\n");
+    }
+    const commonSet = new Set([...serverCommonTables, ...commonTableNames()]);
     const backendTables = (data.tables || []).map((table) => ({
       name: table.name,
       source: table.source_file || table.source || "",
       field_count: table.field_count || 0,
-      primary_key: table.primary_key || []
+      primary_key: table.primary_key || [],
+      is_common: Boolean(table.is_common) || commonSet.has(table.name)
     }));
-    const commonOnly = commonTableNames()
+    const commonOnly = [...commonSet]
       .filter((name) => !backendTables.some((table) => table.name === name))
-      .map((name) => ({ name, source: "common" }));
+      .map((name) => ({ name, source: "常用表", is_common: true }));
     tableOptions = [...commonOnly, ...backendTables].sort((left, right) => left.name.localeCompare(right.name));
   } catch (error) {
     tableOptions = fallbackTableOptionsFromManifest();
@@ -293,7 +300,7 @@ async function loadTableOptions({ silent = false } = {}) {
 
 function renderTableList() {
   const query = tableSearchInput.value.trim().toLowerCase();
-  const common = new Set(commonTableNames());
+  const common = new Set([...serverCommonTables, ...commonTableNames()]);
   const options = tableOptions.filter((table) => {
     if (!query) return true;
     return `${table.name} ${table.source || ""}`.toLowerCase().includes(query);
@@ -311,7 +318,7 @@ function renderTableList() {
   tableList.innerHTML = options
     .map((table) => {
       const checked = pendingTargetSelection.has(table.name) ? "checked" : "";
-      const commonBadge = common.has(table.name) ? '<span class="badge">常用</span>' : "";
+      const commonBadge = common.has(table.name) || table.is_common ? '<span class="badge">常用</span>' : "";
       const pk = table.primary_key?.length ? `主键：${table.primary_key.join(", ")}` : "主键：待识别";
       const fields = table.field_count ? `字段：${table.field_count}` : "";
       return `
