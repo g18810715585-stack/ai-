@@ -215,7 +215,12 @@ def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: 
                     "The JSON must match this Patch shape: patch_id, project, mode, operations, generated_by. "
                     "Each operation must include op, target_table, source_ref, reason, confidence, risk_level, "
                     "needs_confirmation, and the required match/set/rows fields for the op. "
-                    "Use only target tables and fields from schema. If no safe change can be made, return operations: []."
+                    "Use only target tables and fields from schema. When planning rows, matched experience, "
+                    "field mappings, or relationship_map provide evidence, generate a supervised patch for the "
+                    "evidenced fields and mark uncertain or high-risk operations as needs_confirmation=true. "
+                    "Do not return an empty patch only because some recommended fields are missing; omit uncertain "
+                    "fields or use high risk. Return operations: [] only when there is no writable target table, "
+                    "no usable primary key/insert-row evidence, or no schema field can be mapped safely."
                 ),
             },
             {

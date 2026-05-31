@@ -45,6 +45,9 @@ def build_minimal_context(
             "Do not invent objects not present in planning rows or habits.",
             "When planning_item_resolution is present, use it as evidence for product reward type, content ID, and quantity.",
             "Mark low-confidence or high-risk operations as needs_confirmation=true.",
+            "If an activity template, field mappings, relationships, and planning rows provide enough evidence, generate a supervised patch even when some fields still need confirmation.",
+            "Do not return an empty patch only because non-critical fields are missing; write the evidenced fields and leave uncertain values out or mark the operation high risk with needs_confirmation=true.",
+            "Only return zero operations when there is no target table path, no usable primary key or insert row evidence, or the schema has no writable target table for the detected activity.",
         ],
         "schema": {
             "tables": {

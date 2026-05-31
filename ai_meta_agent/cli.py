@@ -105,6 +105,45 @@ def _targeted_schema(schema: Any, manifest: Manifest) -> Any:
     return schema
 
 
+def _schema_for_tables(schema: Any, table_names: list[str]) -> Any:
+    selected = {name: schema.tables[name] for name in table_names if name in schema.tables}
+    schema = schema.model_copy(deep=True)
+    schema.tables = selected
+    return schema
+
+
+def _ordered_unique(values: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for value in values:
+        name = str(value or "").strip()
+        if name and name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
+
+
+def _auto_expand_generation_tables(manifest: Manifest, full_schema: Any, config_plan: dict[str, Any]) -> tuple[list[str], list[str]]:
+    if not manifest.target_tables:
+        return list(full_schema.tables.keys()), []
+    selected = [name for name in manifest.target_tables if name in full_schema.tables]
+    recommended = _ordered_unique(
+        [
+            *selected,
+            *config_plan.get("relation_chain", []),
+            *list((config_plan.get("required_fields") or {}).keys()),
+            *(config_plan.get("recommended_target_tables") or [])[:4],
+        ]
+    )
+    available = [name for name in recommended if name in full_schema.tables]
+    extra = [name for name in available if name not in selected]
+    # Keep expansion focused: these tables are only added when the activity
+    # template or relation scan named them, and every generated operation still
+    # goes through preview/validation before any overwrite is possible.
+    limited = [*selected, *extra[:8]]
+    return limited, [name for name in limited if name not in selected]
+
+
 def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis") -> tuple[Manifest, Any, Path, dict[str, Any]]:
     manifest = _load_manifest(manifest_path)
     full_schema = load_schema(_schema_path(base_dir, manifest))
@@ -122,12 +161,24 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
     habits = load_habits(_habit_path(base_dir, manifest))
     matched = match_habits(habits, manifest.project, list(schema.tables.keys()))
     experience = build_experience_context(base_dir, manifest, schema, workbooks, relationship_map)
+    auto_tables, auto_included_tables = _auto_expand_generation_tables(manifest, full_schema, experience["config_plan"])
+    if auto_included_tables:
+        schema = _schema_for_tables(full_schema, auto_tables)
+        manifest = manifest.model_copy(update={"target_tables": auto_tables}, deep=True)
+        manifest, config_discovery = discover_config_tables(manifest, schema, base_dir)
+        relationship_map = scan_relationships(manifest, full_schema, base_dir, run_dir, _schema_scan_report_path(base_dir, manifest))
+        matched = match_habits(habits, manifest.project, list(schema.tables.keys()))
+        experience = build_experience_context(base_dir, manifest, schema, workbooks, relationship_map)
+        experience["config_plan"]["auto_included_target_tables"] = auto_included_tables
+    else:
+        auto_included_tables = []
     item_resolution = resolve_planning_items(manifest, workbooks)
     compact_items = compact_item_resolution(item_resolution)
     context = build_minimal_context(manifest, schema, workbooks, matched, experience_context_payload(experience), compact_items)
     context["source_errors"] = source_errors
     context["config_discovery"] = config_discovery
     context["relationship_map"] = compact_relationship_context(relationship_map)
+    context["auto_included_target_tables"] = auto_included_tables
     analysis = {
         "run_dir": str(run_dir),
         "manifest": manifest.model_dump(mode="json"),
@@ -140,6 +191,7 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
         "planning_item_resolution": item_resolution,
         "experience": experience,
         "config_plan": experience["config_plan"],
+        "auto_included_target_tables": auto_included_tables,
     }
     write_json(run_dir / "analysis.json", analysis)
     write_json(run_dir / "ai-context.json", context)

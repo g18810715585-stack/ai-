@@ -13,7 +13,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import PatternFill
 
-from ai_meta_agent.cli import analyze_manifest
+from ai_meta_agent.cli import _auto_expand_generation_tables, analyze_manifest
 from ai_meta_agent.configuration_records import build_configuration_record, local_case_review, save_case_review
 from ai_meta_agent.draft import call_baseai, call_draft_diagnostics_ai, call_experience_summary_ai, call_relationship_ai, make_stub_patch
 from ai_meta_agent.draft_diagnostics import build_draft_diagnostics, compact_draft_diagnostic_context
@@ -429,6 +429,38 @@ class WorkflowTests(unittest.TestCase):
             cases = [json.loads(line) for line in (tmp / ".knowledge" / "case_examples.jsonl").read_text(encoding="utf-8").splitlines()]
         self.assertEqual(case["target_tables"], ["activity"])
         self.assertEqual(cases[0]["decision"], "accepted")
+
+    def test_config_plan_auto_expands_generation_target_tables(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "auto-target-sample",
+                "schema_path": "schema.json",
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "planning.xlsx", "role": "planning"}],
+                "target_tables": ["activity", "active_shop"],
+            }
+        )
+        schema = SchemaBundle.model_validate(
+            {
+                "tables": {
+                    "activity": {"primary_key": ["id"], "fields": {"id": {}, "form_list": {}}},
+                    "active_shop": {"primary_key": ["id"], "fields": {"id": {}, "group": {}}},
+                    "exchange": {"primary_key": ["id"], "fields": {"id": {}, "activity_id": {}, "price": {}}},
+                    "reward": {"primary_key": ["id"], "fields": {"id": {}}},
+                    "goods": {"primary_key": ["item_id"], "fields": {"item_id": {}, "name": {}}},
+                    "key": {"primary_key": ["key"], "fields": {"key": {}, "text": {}}},
+                }
+            }
+        )
+        plan = {
+            "relation_chain": ["activity", "active_shop", "exchange", "reward", "goods", "key"],
+            "required_fields": {"exchange": ["id"], "goods": ["item_id"]},
+            "recommended_target_tables": ["exchange", "goods", "missing_table"],
+        }
+
+        tables, included = _auto_expand_generation_tables(manifest, schema, plan)
+
+        self.assertEqual(tables, ["activity", "active_shop", "exchange", "reward", "goods", "key"])
+        self.assertEqual(included, ["exchange", "reward", "goods", "key"])
 
     def test_config_root_discovers_tables(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

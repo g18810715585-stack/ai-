@@ -872,6 +872,7 @@ function formatConfigPlan(plan) {
   }
   appendList(lines, "建议补选配置表", plan.recommended_target_tables);
   appendList(lines, "本次完整建议表", plan.all_recommended_tables);
+  appendList(lines, "自动纳入生成范围", plan.auto_included_target_tables);
   appendRequiredFields(lines, plan.required_fields);
   appendMatchedMappings(lines, plan.matched_field_mappings);
   appendMatchedRules(lines, plan.matched_rules);
@@ -934,6 +935,7 @@ function formatDraftDiagnostics(diagnostics) {
     lines.push("");
   }
   appendList(lines, "下一步", diagnostics.next_steps);
+  appendList(lines, "自动纳入生成范围", diagnostics.auto_included_target_tables);
   if (diagnostics.ai_review && !diagnostics.ai_review.error) {
     lines.push("AI 诊断");
     lines.push(JSON.stringify(diagnostics.ai_review, null, 2));

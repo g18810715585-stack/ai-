@@ -62,6 +62,7 @@ def compact_draft_diagnostic_context(manifest: Manifest, context: dict[str, Any]
         },
         "relationship_map": _compact_relationship_map(context.get("relationship_map") or {}),
         "config_plan": context.get("config_plan", {}),
+        "auto_included_target_tables": context.get("auto_included_target_tables", []),
         "source_errors": context.get("source_errors", []),
     }
 
@@ -91,7 +92,12 @@ def build_draft_diagnostics(
     relation_map = context.get("relationship_map") or {}
     config_plan = context.get("config_plan") or {}
     target_tables = context.get("target_tables", [])
+    auto_included = context.get("auto_included_target_tables", [])
     recommended = [name for name in relation_map.get("recommended_tables", []) if name not in target_tables]
+    if auto_included:
+        reasons_auto = f"auto included related target tables for this draft: {', '.join(auto_included)}"
+    else:
+        reasons_auto = ""
     schema_tables = context.get("schema", {}).get("tables") or {}
     workbooks = context.get("workbooks") or []
 
@@ -106,6 +112,9 @@ def build_draft_diagnostics(
         reasons.append("规划表表头与目标配置表字段缺少直接重名或明显对应关系。")
     if recommended:
         reasons.append("已分析到关联表，但这些表尚未全部作为本次生成草案的目标表。")
+
+    if reasons_auto:
+        reasons.append(reasons_auto)
 
     missing = [
         "每条需要新增或修改配置的唯一 ID / 主键 / 可匹配条件。",
@@ -126,6 +135,7 @@ def build_draft_diagnostics(
         "missing_information": missing,
         "suggested_target_tables": recommended[:20],
         "suggested_field_mappings": _suggest_field_mappings(schema_tables),
+        "auto_included_target_tables": auto_included,
         "planning_overview": [_compact_workbook(workbook) for workbook in workbooks],
         "relationship_summary": {
             "relation_count": relation_map.get("summary", {}).get("relation_count", 0),
