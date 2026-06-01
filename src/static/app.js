@@ -2068,7 +2068,7 @@ document.querySelector("#analyzeBtn").addEventListener("click", (event) => runAc
   showTab("result");
 }));
 
-document.querySelector("#draftBtn").addEventListener("click", (event) => runAction(event, async (label) => {
+async function generateDraft(label = "生成草案") {
   ensureActiveProject();
   ensureTargetTablesSelected();
   const payload = await buildPayload();
@@ -2102,7 +2102,8 @@ document.querySelector("#draftBtn").addEventListener("click", (event) => runActi
   } else {
     showTab("dataPreview");
   }
-}));
+  return { data, operationCount, diagnostics };
+}
 
 async function applyCurrentPatch(writeMode, label) {
   ensureActiveProject();
@@ -2115,8 +2116,15 @@ async function applyCurrentPatch(writeMode, label) {
   showTab("record");
 }
 
-document.querySelector("#applyBtn").addEventListener("click", (event) => runAction(event, async (label) => {
-  await applyCurrentPatch("preview", label);
+document.querySelector("#draftBtn").addEventListener("click", (event) => runAction(event, async () => {
+  const { operationCount, diagnostics } = await generateDraft("生成草案");
+  if (operationCount === 0) {
+    const suffix = diagnostics ? "，请先查看草案诊断" : "";
+    setStatus(`草案没有可执行变更，已跳过生成预览${suffix}`, "ok");
+    return;
+  }
+  await applyCurrentPatch("preview", "生成预览");
+  setStatus("草案和预览已生成", "ok");
 }));
 
 document.querySelector("#overwriteBtn").addEventListener("click", (event) => runAction(event, async (label) => {
@@ -2128,7 +2136,7 @@ document.querySelector("#overwriteBtn").addEventListener("click", (event) => run
 saveCaseReviewBtn.addEventListener("click", (event) => runAction(event, async (label) => {
   ensureActiveProject();
   if (!lastApplyResult || !lastConfigurationRecord) {
-    throw new Error("请先生成预览或覆盖原表，拿到本次配表记录后再复盘。");
+    throw new Error("请先生成草案和预览，或覆盖原表，拿到本次配表记录后再复盘。");
   }
   const correction = caseCorrectionText.value.trim();
   if (!correction) throw new Error("请先填写这次配表的问题。");
