@@ -151,6 +151,7 @@ let fieldDictionary = [];
 let selectedDictionaryId = "";
 let lastApplyResult = null;
 let lastConfigurationRecord = null;
+let latestOptimization = null;
 
 const rememberedFields = [
   ["configDir", configDirInput],
@@ -394,6 +395,8 @@ function restoreProjectSteps(project) {
   }
   const diagnostics = steps.draft?.data?.draftDiagnostics;
   if (diagnostics) diagnosticsText.textContent = formatDraftDiagnostics(diagnostics);
+  const optimization = compactOptimization({ artifact: steps.draft?.data || steps.analyze?.data || {} });
+  latestOptimization = optimization || latestOptimization;
   if (steps.draft?.data?.draftTablePreview) {
     renderDraftTablePreview(steps.draft.data.draftTablePreview);
   }
@@ -419,7 +422,8 @@ function restoreProjectSteps(project) {
     resultText.textContent = JSON.stringify({
       restored_from_project: true,
       analysis,
-      planning_item_resolution: steps.analyze?.data?.planningItemResolution || null
+      planning_item_resolution: steps.analyze?.data?.planningItemResolution || null,
+      context_optimization: optimization
     }, null, 2);
   }
 }
@@ -1415,7 +1419,29 @@ function compactItemResolution(data) {
     summary: resolution.summary || {},
     matches: (resolution.matches || []).slice(0, 30),
     missing: (resolution.missing || []).slice(0, 20),
+    column_mappings: (resolution.column_mappings || []).slice(0, 8),
     warnings: resolution.warnings || []
+  };
+}
+
+function compactOptimization(data) {
+  const budget = data.artifact?.contextBudget || null;
+  const timing = data.artifact?.draftTiming || null;
+  const value = data.artifact?.valueCandidates || data.artifact?.planningItemResolution || null;
+  if (!budget && !timing && !value) return null;
+  return {
+    context_budget: budget ? {
+      original_kb: budget.original?.kb,
+      optimized_kb: budget.optimized?.kb,
+      saved_kb: budget.savings?.kb,
+      saved_percent: budget.savings?.percent,
+      estimated_tokens: budget.optimized?.estimated_tokens,
+      value_sample_rows_before: budget.rows?.value_sample_rows_before,
+      value_sample_rows_sent_to_ai: budget.rows?.value_sample_rows_sent_to_ai,
+      planning_evidence_rows_sent_to_ai: budget.rows?.planning_evidence_rows_sent_to_ai
+    } : null,
+    draft_timing: timing || null,
+    item_resolution_summary: value?.summary || null
   };
 }
 
@@ -2060,6 +2086,7 @@ document.querySelector("#analyzeBtn").addEventListener("click", (event) => runAc
     {
       summary: parseStdout(data),
       planning_item_resolution: compactItemResolution(data),
+      context_optimization: compactOptimization(data),
       analysis: data.artifact?.analysis || null
     },
     null,
@@ -2081,6 +2108,7 @@ async function generateDraft(label = "生成草案") {
   }
   payload.stub = draftMode !== "real";
   const data = await callApi("/api/draft", payload, { label });
+  latestOptimization = compactOptimization(data);
   if (data.artifact?.patch) {
     lastPatch = data.artifact.patch;
     patchText.value = JSON.stringify(lastPatch, null, 2);
@@ -2094,7 +2122,15 @@ async function generateDraft(label = "生成草案") {
   }
   renderPlanArtifact(data);
   renderDraftTablePreview(compactDraftTablePreview(data));
-  resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
+  resultText.textContent = JSON.stringify(
+    {
+      summary: parseStdout(data),
+      context_optimization: latestOptimization,
+      planning_item_resolution: compactItemResolution(data)
+    },
+    null,
+    2
+  );
   const operationCount = data.artifact?.patch?.operations?.length || 0;
   if (operationCount === 0 && diagnostics) {
     setStatus("生成草案完成：没有安全变更，已生成诊断", "ok");
@@ -2112,7 +2148,14 @@ async function applyCurrentPatch(writeMode, label) {
   payload.write_mode = writeMode;
   const data = await callApi("/api/apply", payload, { label });
   renderConfigurationRecord(data);
-  resultText.textContent = JSON.stringify(data.artifact || parseStdout(data), null, 2);
+  resultText.textContent = JSON.stringify(
+    {
+      apply: data.artifact || parseStdout(data),
+      context_optimization: latestOptimization
+    },
+    null,
+    2
+  );
   showTab("record");
 }
 

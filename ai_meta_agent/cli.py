@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 from .ai_context import build_minimal_context, summarize_analysis
+from .context_optimizer import build_context_budget, optimize_context_for_ai
 from .config_discovery import discover_config_tables
 from .configuration_records import (
     build_configuration_record,
@@ -207,6 +209,10 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
     context["config_discovery"] = config_discovery
     context["relationship_map"] = compact_relationship_context(relationship_map)
     context["auto_included_target_tables"] = auto_included_tables
+    ai_context = optimize_context_for_ai(context)
+    context_budget = build_context_budget(context, ai_context)
+    context["_ai_context"] = ai_context
+    context["_context_budget"] = context_budget
     analysis = {
         "run_dir": str(run_dir),
         "manifest": manifest.model_dump(mode="json"),
@@ -223,9 +229,11 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
         "auto_included_target_tables": auto_included_tables,
     }
     write_json(run_dir / "analysis.json", analysis)
-    write_json(run_dir / "ai-context.json", context)
+    write_json(run_dir / "ai-context.json", ai_context)
+    write_json(run_dir / "context-budget.json", context_budget)
     write_json(run_dir / "config-plan.json", experience["config_plan"])
     write_json(run_dir / "planning-item-resolution.json", item_resolution)
+    write_json(run_dir / "value-candidates.json", compact_items)
     write_text(run_dir / "analysis.md", summarize_analysis(workbooks, schema, matched))
     return manifest, schema, run_dir, context
 
@@ -236,7 +244,12 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     if not manifest_path.is_absolute():
         manifest_path = base_dir / manifest_path
     _, _, run_dir, analysis_context = analyze_manifest(manifest_path, base_dir, "analysis")
-    output = {"run_dir": str(run_dir), "source_errors": analysis_context.get("source_errors", [])}
+    output = {
+        "run_dir": str(run_dir),
+        "source_errors": analysis_context.get("source_errors", []),
+        "context_budget": str(run_dir / "context-budget.json"),
+        "planning_item_resolution": str(run_dir / "planning-item-resolution.json"),
+    }
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
 
@@ -508,14 +521,30 @@ def cmd_draft(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest)
     if not manifest_path.is_absolute():
         manifest_path = base_dir / manifest_path
+    draft_started = time.perf_counter()
     manifest, schema, run_dir, context = analyze_manifest(manifest_path, base_dir, "draft")
+    analysis_finished = time.perf_counter()
+    ai_context = context.get("_ai_context", context)
     if args.context_only:
-        print(json.dumps({"run_dir": str(run_dir), "context": str(run_dir / "ai-context.json")}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "run_dir": str(run_dir),
+                    "context": str(run_dir / "ai-context.json"),
+                    "context_budget": str(run_dir / "context-budget.json"),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
+    ai_started = time.perf_counter()
     if args.stub:
         patch = make_stub_patch(manifest, schema, context, str(base_dir))
+        ai_finished = time.perf_counter()
     else:
-        patch = call_baseai(manifest, context, run_dir / "ai-response.json")
+        patch = call_baseai(manifest, ai_context, run_dir / "ai-response.json")
+        ai_finished = time.perf_counter()
     id_allocation = fill_incremental_placeholders(patch, context)
     Patch.model_validate(patch.model_dump())
     write_json(run_dir / "patch.json", patch.model_dump(mode="json", exclude_none=True))
@@ -529,19 +558,26 @@ def cmd_draft(args: argparse.Namespace) -> int:
         try:
             ai_review = call_draft_diagnostics_ai(
                 manifest,
-                compact_draft_diagnostic_context(manifest, context, patch),
+                compact_draft_diagnostic_context(manifest, ai_context, patch),
                 run_dir / "draft-diagnostics-ai-response.json",
             )
         except Exception as exc:  # noqa: BLE001 - local diagnostics still explain the empty patch.
             ai_review = {"error": str(exc)}
     diagnostics = build_draft_diagnostics(
         manifest,
-        context,
+        ai_context,
         patch,
         ai_reason=ai_reason,
         ai_review=ai_review,
     )
     write_json(run_dir / "draft-diagnostics.json", diagnostics)
+    timing = {
+        "local_analysis_seconds": round(analysis_finished - draft_started, 3),
+        "ai_wait_seconds": round(ai_finished - ai_started, 3),
+        "postprocess_seconds": round(time.perf_counter() - ai_finished, 3),
+        "mode": "stub" if args.stub else "real_ai",
+    }
+    write_json(run_dir / "draft-timing.json", timing)
     write_text(run_dir / "patch.md", _patch_markdown(patch))
     print(
         json.dumps(
@@ -550,6 +586,10 @@ def cmd_draft(args: argparse.Namespace) -> int:
                 "patch": str(run_dir / "patch.json"),
                 "draft_table_preview": str(run_dir / "draft-table-preview.json"),
                 "draft_diagnostics": str(run_dir / "draft-diagnostics.json"),
+                "context_budget": str(run_dir / "context-budget.json"),
+                "draft_timing": str(run_dir / "draft-timing.json"),
+                "planning_item_resolution": str(run_dir / "planning-item-resolution.json"),
+                "value_candidates": str(run_dir / "value-candidates.json"),
                 "operations": len(patch.operations),
                 "diagnostic_status": diagnostics["status"],
             },

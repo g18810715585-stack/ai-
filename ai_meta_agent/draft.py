@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -247,6 +248,7 @@ def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: 
         method="POST",
     )
     timeout = int(os.environ.get("AI_REQUEST_TIMEOUT_SECONDS", DEFAULT_AI_TIMEOUT_SECONDS))
+    started = time.perf_counter()
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
@@ -259,8 +261,23 @@ def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: 
         raise RuntimeError(f"{runtime['label']} 请求失败：HTTP {exc.code} {message}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"{runtime['label']} 网络连接失败：{exc.reason}") from exc
+    elapsed = time.perf_counter() - started
     if raw_response_path:
-        write_json(raw_response_path, {"provider": runtime["id"], "base_url": base_url, "model": model, "response": payload})
+        request_bytes = len(json.dumps(context, ensure_ascii=False).encode("utf-8"))
+        write_json(
+            raw_response_path,
+            {
+                "provider": runtime["id"],
+                "base_url": base_url,
+                "model": model,
+                "timing": {
+                    "ai_wait_seconds": round(elapsed, 3),
+                    "request_context_kb": round(request_bytes / 1024, 1),
+                    "estimated_prompt_tokens": round(request_bytes / 4),
+                },
+                "response": payload,
+            },
+        )
     content = payload["choices"][0]["message"]["content"]
     try:
         parsed = json.loads(content)

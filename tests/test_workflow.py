@@ -16,6 +16,7 @@ from openpyxl.styles import PatternFill
 from ai_meta_agent.ai_context import build_minimal_context
 from ai_meta_agent.cli import _auto_expand_generation_tables, analyze_manifest
 from ai_meta_agent.configuration_records import build_configuration_record, local_case_review, save_case_review
+from ai_meta_agent.context_optimizer import build_context_budget, compact_target_table_profiles, optimize_context_for_ai
 from ai_meta_agent.draft import call_baseai, call_draft_diagnostics_ai, call_experience_summary_ai, call_relationship_ai, make_stub_patch
 from ai_meta_agent.draft_diagnostics import build_draft_diagnostics, compact_draft_diagnostic_context
 from ai_meta_agent.draft_preview import build_draft_table_preview
@@ -1324,6 +1325,156 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result["summary"]["matched"], 1)
         self.assertEqual(result["matches"][0]["reward_type"], 7)
         self.assertEqual(result["matches"][0]["content_id"], 323)
+
+    def test_planning_items_infer_weak_value_table_columns(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "weak-value-table",
+                "schema_path": "schema.json",
+                "planning_sources": [
+                    {"id": "plan", "kind": "feishu", "url": "https://rivergame.feishu.cn/wiki/plan?sheet=a", "role": "planning"},
+                    {"id": "value", "kind": "feishu", "url": "https://rivergame.feishu.cn/wiki/value?sheet=b", "role": "item_base"},
+                ],
+            }
+        )
+        workbooks = [
+            WorkbookIR(
+                source_id="plan",
+                source_type=SourceKind.FEISHU,
+                sheets=[
+                    SheetIR(
+                        name="规划表",
+                        max_row=2,
+                        max_column=2,
+                        headers=["商品名称", "价格"],
+                        header_row=1,
+                        sample_rows=[{"__row": 2, "商品名称": "克拉肯", "价格": 100}],
+                    )
+                ],
+            ),
+            WorkbookIR(
+                source_id="value",
+                source_type=SourceKind.FEISHU,
+                sheets=[
+                    SheetIR(
+                        name="配置转换表",
+                        max_row=4,
+                        max_column=4,
+                        headers=["部族灵魂石", "33", "2", "142"],
+                        header_row=6,
+                        sample_rows=[
+                            {"__row": 7, "部族灵魂石": "克拉肯", "33": 33, "2": 7, "142": 323},
+                            {"__row": 8, "部族灵魂石": "自然灵魂石", "33": 33, "2": 2, "142": 143},
+                            {"__row": 9, "部族灵魂石": "武器进阶石", "33": 50, "2": 2, "142": 144},
+                        ],
+                    )
+                ],
+            ),
+        ]
+
+        result = resolve_planning_items(manifest, workbooks)
+
+        self.assertEqual(result["summary"]["matched"], 1)
+        self.assertEqual(result["matches"][0]["reward_type"], 7)
+        self.assertEqual(result["matches"][0]["content_id"], 323)
+        self.assertEqual(result["summary"]["inferred_item_base_sheets"], 1)
+
+    def test_ai_context_omits_value_rows_and_reports_budget(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "optimized-context",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [
+                    {"id": "plan", "kind": "local_excel", "path": "dummy.xlsx", "role": "planning"},
+                    {"id": "value", "kind": "local_excel", "path": "value.xlsx", "role": "item_base"},
+                ],
+            }
+        )
+        schema = SchemaBundle.model_validate(
+            {
+                "version": 1,
+                "tables": {
+                    "reward": {
+                        "primary_key": ["id"],
+                        "fields": {"id": {"type": "str"}, "type_1": {"type": "str"}, "reward_1": {"type": "str"}},
+                    }
+                },
+            }
+        )
+        workbooks = [
+            WorkbookIR(
+                source_id="plan",
+                source_type=SourceKind.LOCAL_EXCEL,
+                sheets=[
+                    SheetIR(
+                        name="规划表",
+                        max_row=2,
+                        max_column=2,
+                        headers=["商品名称", "价格"],
+                        header_row=1,
+                        sample_rows=[{"__row": 2, "商品名称": "商品42", "价格": 100}],
+                    )
+                ],
+            ),
+            WorkbookIR(
+                source_id="feishu-value-table",
+                source_type=SourceKind.FEISHU,
+                sheets=[
+                    SheetIR(
+                        name="价值表",
+                        max_row=5200,
+                        max_column=4,
+                        headers=["商品名", "奖励类型", "内容ID"],
+                        header_row=1,
+                        sample_rows=[{"__row": index, "商品名": f"商品{index}", "奖励类型": 7, "内容ID": index} for index in range(1, 5201)],
+                    )
+                ],
+            ),
+        ]
+        resolution = resolve_planning_items(manifest, workbooks)
+        context = build_minimal_context(manifest, schema, workbooks, [], None, resolution)
+
+        optimized = optimize_context_for_ai(context)
+        budget = build_context_budget(context, optimized)
+        value_sheet = [workbook for workbook in optimized["workbooks"] if workbook["source_id"] == "feishu-value-table"][0]["sheets"][0]
+
+        self.assertEqual(value_sheet["sample_rows"], [])
+        self.assertEqual(budget["rows"]["value_sample_rows_before"], 5000)
+        self.assertEqual(budget["rows"]["value_sample_rows_sent_to_ai"], 0)
+        self.assertLess(budget["optimized"]["bytes"], budget["original"]["bytes"])
+        self.assertIn("resolved_items", optimized)
+
+    def test_compact_profiles_keep_id_allocation_evidence(self) -> None:
+        profiles = {
+            "activity": {
+                "sheet": "activity",
+                "header_row": 1,
+                "row_count": 6000,
+                "primary_key": ["id"],
+                "group_key": None,
+                "generation_summary": {"allocatable_fields": ["id"]},
+                "next_values": {"id": 5861},
+                "fields": {
+                    "id": {
+                        "field": "id",
+                        "allocation_role": "primary_key",
+                        "next_value": 5861,
+                        "next_value_basis": "activity_regular_section",
+                        "activity_regular_last_numeric": 5860,
+                        "activity_regular_last_numeric_row": 6411,
+                    },
+                    "备注": {"field": "备注", "sample_values": ["旧活动"]},
+                },
+                "tail_rows": [{"__row": 6411, "id": 5860, "备注": "常规活动"}, {"__row": 6420, "id": 20001003, "备注": "以下为赛季活动"}],
+            }
+        }
+
+        compact = compact_target_table_profiles(profiles)
+
+        self.assertEqual(compact["activity"]["next_values"]["id"], 5861)
+        self.assertEqual(compact["activity"]["fields"]["id"]["next_value_basis"], "activity_regular_section")
+        self.assertNotIn("备注", compact["activity"]["fields"])
 
     def test_company_bi_model_provider_choices_share_baseai_endpoint(self) -> None:
         response_payload = {
