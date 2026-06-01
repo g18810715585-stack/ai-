@@ -1300,7 +1300,8 @@ def _match_rules(rules: list[dict[str, Any]], project: str, signals: dict[str, A
         score = float(rule.get("confidence", 0.5))
         if rule.get("project") == project:
             score += 0.08
-        overlap = len(set(rule.get("applies_to_tables", [])) & target_tables)
+        rule_tables = _ordered_unique([*rule.get("applies_to_tables", []), *_extract_table_names(str(rule.get("text", "")))])
+        overlap = len(set(rule_tables) & target_tables)
         if overlap:
             score += min(0.12, overlap * 0.04)
         tag_hits = [tag for tag in rule.get("scenario_tags", []) if _norm(tag) in text]
@@ -1308,6 +1309,7 @@ def _match_rules(rules: list[dict[str, Any]], project: str, signals: dict[str, A
             score += min(0.18, len(tag_hits) * 0.06)
         if score >= 0.55 and (overlap or tag_hits or rule.get("project") == project):
             item = dict(rule)
+            item["applies_to_tables"] = rule_tables
             item["match_score"] = round(min(score, 0.98), 3)
             item["matched_tags"] = tag_hits
             scored.append(item)
@@ -1504,7 +1506,7 @@ def _parse_explicit_mappings(project: str, text: str, timestamp: str, source: st
 
 
 def _extract_table_names(text: str) -> list[str]:
-    names = re.findall(r"\b[A-Za-z][A-Za-z0-9_]{2,}\b", text)
+    names = re.findall(r"(?<![A-Za-z0-9_])([A-Za-z][A-Za-z0-9_]{2,})(?![A-Za-z0-9_])", text)
     ignored = {"AI", "JSON", "Patch", "Excel", "ID"}
     return _ordered_unique([name for name in names if name not in ignored and "_" in name])
 

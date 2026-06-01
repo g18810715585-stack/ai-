@@ -37,6 +37,7 @@ from ai_meta_agent.experience import (
 )
 from ai_meta_agent.feishu import FeishuSourcePayload, read_feishu_sheet
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
+from ai_meta_agent.id_allocator import fill_active_shop_incremental_ids
 from ai_meta_agent.io_utils import read_json, write_json
 from ai_meta_agent.item_resolution import resolve_planning_items
 from ai_meta_agent.models import Manifest, Patch, PlanningSource, SchemaBundle, SheetIR, SourceKind, WorkbookIR
@@ -44,6 +45,7 @@ from ai_meta_agent.patch_engine import apply_patch
 from ai_meta_agent.relation_scanner import scan_relationships, split_reference_values
 from ai_meta_agent.schema import load_schema
 from ai_meta_agent.schema_scanner import scan_config_schema
+from ai_meta_agent.table_profiles import build_target_table_profiles
 from ai_meta_agent.workbook_ir import load_source_ir
 
 
@@ -496,6 +498,82 @@ class WorkflowTests(unittest.TestCase):
         sheet = context["workbooks"][0]["sheets"][0]
         self.assertEqual(len(sheet["sample_rows"]), 5000)
         self.assertEqual(sheet["sample_rows_omitted"], 200)
+
+    def test_target_table_profiles_expose_next_active_shop_values(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            config_path = tmp / "active_shop.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "active_shop"
+            sheet.append(["id", "商品组", "商品"])
+            sheet.append([101, 220, 9001])
+            sheet.append([102, 221, 9002])
+            workbook.save(config_path)
+            manifest = Manifest.model_validate(
+                {
+                    "project": "profile-sample",
+                    "mode": "supervised_write",
+                    "schema_path": str(ROOT / "config" / "example.schema.json"),
+                    "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx"}],
+                    "config_tables": {"active_shop": {"path": str(config_path), "sheet": "active_shop"}},
+                }
+            )
+            schema = SchemaBundle.model_validate(
+                {
+                    "version": 1,
+                    "tables": {
+                        "active_shop": {
+                            "primary_key": ["id"],
+                            "fields": {"id": {"type": "int"}, "商品组": {"type": "int"}, "商品": {"type": "int"}},
+                        }
+                    },
+                }
+            )
+
+            profiles = build_target_table_profiles(manifest, schema, tmp)
+            self.assertEqual(profiles["active_shop"]["next_values"]["id"], 103)
+            self.assertEqual(profiles["active_shop"]["next_values"]["商品组"], 222)
+
+    def test_active_shop_placeholders_are_filled_from_profiles(self) -> None:
+        patch = Patch.model_validate(
+            {
+                "patch_id": "fill-active-shop",
+                "project": "profile-sample",
+                "operations": [
+                    {
+                        "op": "insert",
+                        "target_table": "activity",
+                        "rows": [{"id": 1, "活动形式模块": "7|<NEW_ACTIVE_SHOP_GROUP_PAID>|605092003|<NEW_ACTIVE_SHOP_GROUP_FREE>|605092004"}],
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "引用新商店组",
+                        "confidence": 0.8,
+                        "risk_level": "medium",
+                    },
+                    {
+                        "op": "insert",
+                        "target_table": "active_shop",
+                        "rows": [
+                            {"id": "<NEW_ACTIVE_SHOP_ID_001>", "商品组": "<NEW_ACTIVE_SHOP_GROUP_PAID>", "商品": "r1"},
+                            {"id": "<NEW_ACTIVE_SHOP_ID_002>", "商品组": "<NEW_ACTIVE_SHOP_GROUP_FREE>", "商品": "r2"},
+                        ],
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "新增商店",
+                        "confidence": 0.8,
+                        "risk_level": "medium",
+                    },
+                ],
+            }
+        )
+        context = {"target_table_profiles": {"active_shop": {"next_values": {"id": 103, "商品组": 222}}}}
+
+        result = fill_active_shop_incremental_ids(patch, context)
+        self.assertEqual(patch.operations[1].rows[0]["id"], 103)
+        self.assertEqual(patch.operations[1].rows[1]["id"], 104)
+        self.assertEqual(patch.operations[1].rows[0]["商品组"], 222)
+        self.assertEqual(patch.operations[1].rows[1]["商品组"], 223)
+        self.assertIn("7|222|605092003|223|605092004", patch.operations[0].rows[0]["活动形式模块"])
+        self.assertEqual(result["filled"]["<NEW_ACTIVE_SHOP_ID_001>"], 103)
 
     def test_structured_correction_is_reused_in_experience_context(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

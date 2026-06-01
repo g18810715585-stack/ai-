@@ -228,6 +228,7 @@ def build_minimal_context(
     habits: list[Habit],
     experience: dict[str, Any] | None = None,
     item_resolution: dict[str, Any] | None = None,
+    target_table_profiles: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     table_names = list(schema.tables.keys())
     context = {
@@ -243,6 +244,7 @@ def build_minimal_context(
             "If an activity template, field mappings, relationships, and planning rows provide enough evidence, generate a supervised patch even when some fields still need confirmation.",
             "Do not return an empty patch only because non-critical fields are missing; write the evidenced fields and leave uncertain values out or mark the operation high risk with needs_confirmation=true.",
             "Only return zero operations when there is no target table path, no usable primary key or insert row evidence, or the schema has no writable target table for the detected activity.",
+            "When target_table_profiles provide next_values, use those deterministic next values for new numeric IDs and group fields instead of placeholders.",
         ],
         "schema": {
             "tables": {
@@ -266,6 +268,8 @@ def build_minimal_context(
         "matched_habits": habit_context(habits),
         "target_tables": table_names,
     }
+    if target_table_profiles:
+        context["target_table_profiles"] = target_table_profiles
     if item_resolution:
         context["planning_item_resolution"] = item_resolution
     compact_experience = _compact_experience(experience)

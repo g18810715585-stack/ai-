@@ -49,6 +49,7 @@ from .experience import (
     update_saved_experience,
 )
 from .habits import append_habit, habit_from_patch, load_habits, match_habits
+from .id_allocator import fill_active_shop_incremental_ids
 from .io_utils import make_run_dir, read_json, write_json, write_text
 from .item_resolution import compact_item_resolution, resolve_planning_items
 from .models import Manifest, Patch
@@ -56,6 +57,7 @@ from .patch_engine import apply_patch
 from .relation_scanner import compact_relationship_context, scan_relationships
 from .schema import load_schema
 from .schema_scanner import scan_config_schema
+from .table_profiles import build_target_table_profiles
 from .workbook_ir import load_source_ir
 
 
@@ -191,7 +193,16 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
         auto_included_tables = []
     item_resolution = resolve_planning_items(manifest, workbooks)
     compact_items = compact_item_resolution(item_resolution)
-    context = build_minimal_context(manifest, schema, workbooks, matched, experience_context_payload(experience), compact_items)
+    target_table_profiles = build_target_table_profiles(manifest, schema, base_dir)
+    context = build_minimal_context(
+        manifest,
+        schema,
+        workbooks,
+        matched,
+        experience_context_payload(experience),
+        compact_items,
+        target_table_profiles,
+    )
     context["source_errors"] = source_errors
     context["config_discovery"] = config_discovery
     context["relationship_map"] = compact_relationship_context(relationship_map)
@@ -206,6 +217,7 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
         "config_discovery": config_discovery,
         "relationship_map": relationship_map,
         "planning_item_resolution": item_resolution,
+        "target_table_profiles": target_table_profiles,
         "experience": experience,
         "config_plan": experience["config_plan"],
         "auto_included_target_tables": auto_included_tables,
@@ -504,8 +516,10 @@ def cmd_draft(args: argparse.Namespace) -> int:
         patch = make_stub_patch(manifest, schema, context, str(base_dir))
     else:
         patch = call_baseai(manifest, context, run_dir / "ai-response.json")
+    id_allocation = fill_active_shop_incremental_ids(patch, context)
     Patch.model_validate(patch.model_dump())
     write_json(run_dir / "patch.json", patch.model_dump(mode="json", exclude_none=True))
+    write_json(run_dir / "id-allocation.json", id_allocation)
     write_json(run_dir / "candidate-habits.json", _candidate_habits_from_patch(patch))
     draft_table_preview = build_draft_table_preview(manifest, schema, patch, base_dir)
     write_json(run_dir / "draft-table-preview.json", draft_table_preview)
