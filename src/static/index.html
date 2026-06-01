@@ -220,10 +220,6 @@
               新增经验
               <textarea id="experienceText" spellcheck="false" placeholder="例如：兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key。规划里商品名通常对应 goods 道具名，价格列对应 exchange 支付价格。"></textarea>
             </label>
-            <div class="experience-actions">
-              <button id="teachBtn" type="button">AI 整理经验</button>
-              <button id="saveExperienceBtn" type="button" disabled>保存经验</button>
-            </div>
             <label class="experience-summary">
               整理结果
               <textarea id="experienceSummaryText" spellcheck="false" placeholder="AI 整理后会显示在这里，你可以修改后再保存。"></textarea>
@@ -231,6 +227,10 @@
             <div id="experienceConflictPanel" class="experience-conflict" hidden>
               <strong>检测到可能冲突</strong>
               <pre id="experienceConflictText"></pre>
+            </div>
+            <div class="experience-actions">
+              <button id="teachBtn" type="button">AI 整理经验</button>
+              <button id="saveExperienceBtn" type="button" disabled>保存经验</button>
             </div>
           </section>
 
