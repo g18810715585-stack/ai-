@@ -284,6 +284,27 @@ class WorkflowTests(unittest.TestCase):
 
         self.assertEqual(patch_obj.operations[0].op, "insert")
 
+    def test_insert_operation_accepts_ai_set_payload_as_single_row(self) -> None:
+        patch_obj = Patch.model_validate(
+            {
+                "patch_id": "patch_insert_set",
+                "project": "unit-sample",
+                "operations": [
+                    {
+                        "op": "insert",
+                        "target_table": "activity",
+                        "set": {"id": 5805, "name": "sample"},
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "ai returned insert payload in set",
+                        "confidence": 0.75,
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(patch_obj.operations[0].rows, [{"id": 5805, "name": "sample"}])
+        self.assertEqual(patch_obj.operations[0].set, {})
+
     def test_teach_experience_writes_local_knowledge(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)

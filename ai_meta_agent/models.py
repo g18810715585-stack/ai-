@@ -150,6 +150,9 @@ class PatchOperation(BaseModel):
 
     @model_validator(mode="after")
     def validate_payload(self) -> "PatchOperation":
+        if self.op == "insert" and not self.rows and self.set:
+            self.rows = [dict(self.set)]
+            self.set = {}
         if self.op == "update" and (not self.match or not self.set):
             raise ValueError("update requires match and set")
         if self.op == "insert" and not self.rows:

@@ -219,7 +219,7 @@ def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: 
                     "Each operation must include op, target_table, source_ref, reason, confidence, risk_level, "
                     "needs_confirmation, and the required match/set/rows fields for the op. "
                     "Allowed op values are exactly insert, update, delete_where, replace_group; use insert with rows "
-                    "for one or many new rows, never insert_rows. "
+                    "for one or many new rows, never insert_rows and never insert+set. "
                     "Use only target tables and fields from schema. Treat run_instruction as the highest-priority "
                     "temporary instruction for this run, but do not convert it into long-term memory. When planning "
                     "rows, activity templates, field dictionary, matched experience, similar cases, structured "
