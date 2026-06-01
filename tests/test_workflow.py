@@ -264,6 +264,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(ref.sheet, "2026年5月航海节活动")
         self.assertEqual(ref.row, 7)
 
+    def test_patch_operation_accepts_common_ai_op_aliases(self) -> None:
+        patch_obj = Patch.model_validate(
+            {
+                "patch_id": "patch_alias_ref",
+                "project": "unit-sample",
+                "operations": [
+                    {
+                        "op": "insert_rows",
+                        "target_table": "activity",
+                        "rows": [{"id": 5805}],
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "ai returned insert_rows alias",
+                        "confidence": 0.75,
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(patch_obj.operations[0].op, "insert")
+
     def test_teach_experience_writes_local_knowledge(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)

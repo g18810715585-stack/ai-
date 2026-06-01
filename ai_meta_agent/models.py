@@ -117,6 +117,23 @@ class PatchOperation(BaseModel):
     risk_level: Literal["low", "medium", "high"] = "medium"
     needs_confirmation: bool = True
 
+    @field_validator("op", mode="before")
+    @classmethod
+    def coerce_op_alias(cls, value: Any) -> Any:
+        aliases = {
+            "insert_rows": "insert",
+            "insert_row": "insert",
+            "add": "insert",
+            "add_rows": "insert",
+            "update_rows": "update",
+            "delete": "delete_where",
+            "remove": "delete_where",
+            "replace_rows": "replace_group",
+        }
+        if isinstance(value, str):
+            return aliases.get(value.strip().lower(), value)
+        return value
+
     @field_validator("source_ref", mode="before")
     @classmethod
     def coerce_source_ref(cls, value: Any) -> Any:
