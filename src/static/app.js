@@ -102,33 +102,16 @@ const aiProviderDefaults = {
   }
 };
 
-const sampleManifest = {
-  project: "sample-pack",
+const defaultManifest = {
+  project: "未命名配表项目",
   mode: "supervised_write",
   schema_path: "config/example.schema.json",
   run_root: ".runs",
   run_instruction: "",
-  planning_sources: [
-    {
-      id: "sample-planning",
-      kind: "local_excel",
-      path: "fixtures/sample-planning.xlsx",
-      role: "planning"
-    }
-  ],
-  config_tables: {
-    shop_pack_config: {
-      path: "fixtures/sample-config.xlsx",
-      sheet: "shop_pack_config"
-    }
-  },
-  config_roots: [
-    {
-      path: "fixtures",
-      recursive: false
-    }
-  ],
-  target_tables: ["shop_pack_config"],
+  planning_sources: [],
+  config_tables: {},
+  config_roots: [],
+  target_tables: [],
   habit_store: ".knowledge/habits.jsonl",
   ai: {
     provider: "chatgpt",
@@ -153,6 +136,10 @@ let serverCommonTables = [];
 let serverCommonTableMeta = new Map();
 resetStoredTablesWhenPresetChanges();
 let selectedTargetTables = readJsonStorage("targetTables", []);
+if (isSampleOnlyTarget(selectedTargetTables)) {
+  selectedTargetTables = [];
+  writeJsonStorage("targetTables", selectedTargetTables);
+}
 let pendingTargetSelection = new Set();
 let latestExperienceSummary = null;
 let latestDraftTablePreview = null;
@@ -374,7 +361,13 @@ function restoreProject(project) {
     latestSchemaPath = inputs.schema_path;
     localStorage.setItem(storageKey("latestSchemaPath"), latestSchemaPath);
   }
-  selectedTargetTables = normalizeTableNames(inputs.target_tables || selectedTargetTables);
+  const restoredTargets = normalizeTableNames(inputs.target_tables || selectedTargetTables);
+  const clearedSampleTarget = isSampleOnlyTarget(restoredTargets);
+  selectedTargetTables = clearedSampleTarget ? [] : restoredTargets;
+  if (clearedSampleTarget) {
+    inputs.target_tables = [];
+    scheduleProjectSave();
+  }
   writeJsonStorage("targetTables", selectedTargetTables);
   updateTargetSummary();
   applyTargetTablesToManifest();
@@ -594,6 +587,11 @@ function normalizeTableNames(values) {
   return result;
 }
 
+function isSampleOnlyTarget(values) {
+  const names = normalizeTableNames(values);
+  return names.length === 1 && names[0] === "shop_pack_config";
+}
+
 function isConfigTableName(name) {
   return /^[A-Za-z][A-Za-z0-9_]*$/.test(String(name || ""));
 }
@@ -704,7 +702,9 @@ function applyTargetTablesToManifest() {
 function syncTargetsFromManifest() {
   try {
     const manifest = JSON.parse(manifestText.value);
-    selectedTargetTables = normalizeTableNames(manifest.target_tables || selectedTargetTables);
+    selectedTargetTables = Object.hasOwn(manifest, "target_tables")
+      ? normalizeTableNames(manifest.target_tables || [])
+      : [];
     writeJsonStorage("targetTables", selectedTargetTables);
     updateTargetSummary();
     scheduleProjectSave();
@@ -829,6 +829,17 @@ function openTargetDialog() {
 
 function closeTargetDialog() {
   targetDialog.hidden = true;
+}
+
+function clearTargetSelectionNow() {
+  pendingTargetSelection.clear();
+  selectedTargetTables = [];
+  writeJsonStorage("targetTables", selectedTargetTables);
+  updateTargetSummary();
+  applyTargetTablesToManifest();
+  renderTableList();
+  scheduleProjectSave();
+  setStatus("已清空目标配置表", "ok");
 }
 
 function saveTargetSelection() {
@@ -1854,16 +1865,6 @@ caseCorrectionText.addEventListener("input", () => {
   scheduleProjectSave();
 });
 
-document.querySelector("#loadSample").addEventListener("click", () => {
-  latestSchemaPath = "";
-  localStorage.removeItem(storageKey("latestSchemaPath"));
-  selectedTargetTables = ["shop_pack_config"];
-  writeJsonStorage("targetTables", selectedTargetTables);
-  manifestText.value = JSON.stringify(sampleManifest, null, 2);
-  updateTargetSummary();
-  setStatus("示例已加载", "ok");
-});
-
 document.querySelector("#newProjectBtn").addEventListener("click", (event) => runAction(event, async () => {
   await createProjectFromPrompt();
 }));
@@ -1897,9 +1898,7 @@ document.querySelector("#closeTargetDialog").addEventListener("click", closeTarg
 document.querySelector("#cancelTargetSelection").addEventListener("click", closeTargetDialog);
 document.querySelector("#saveTargetSelection").addEventListener("click", saveTargetSelection);
 document.querySelector("#clearTargetSelection").addEventListener("click", () => {
-  pendingTargetSelection.clear();
-  renderTableList();
-  setStatus("已清空待选配置表", "ok");
+  clearTargetSelectionNow();
 });
 document.querySelector("#refreshTableOptions").addEventListener("click", async () => {
   setStatus("正在刷新配置表列表...", "busy");
@@ -2170,7 +2169,7 @@ for (const button of document.querySelectorAll(".tab")) {
   button.addEventListener("click", () => showTab(button.dataset.tab));
 }
 
-manifestText.value = JSON.stringify(sampleManifest, null, 2);
+manifestText.value = JSON.stringify(defaultManifest, null, 2);
 restoreRememberedInputs();
 saveExperienceBtn.disabled = !experienceSummaryText.value.trim();
 saveCaseReviewBtn.disabled = true;
