@@ -304,6 +304,7 @@ def load_experience(base_dir: Path) -> dict[str, list[dict[str, Any]]]:
 
 
 def teach_experience(base_dir: Path, project: str, text: str, source: str = "manual") -> dict[str, Any]:
+    ensure_knowledge_files(base_dir)
     root = knowledge_dir(base_dir)
     root.mkdir(parents=True, exist_ok=True)
     now = _now()
@@ -567,18 +568,6 @@ def parse_experience_text(project: str, text: str, source: str = "manual", times
         "last_used_at": timestamp,
     }
 
-    templates = []
-    for template in DEFAULT_ACTIVITY_TEMPLATES:
-        if any(_norm(alias) in normalized for alias in template["aliases"]):
-            item = dict(template)
-            item["template_id"] = _stable_id("template", project, template["template_id"], text)
-            item["project"] = project
-            item["source"] = source
-            item["confidence"] = min(0.95, float(item.get("confidence", 0.65)) + 0.08)
-            item["evidence"] = [*item.get("evidence", []), text[:120]]
-            item["created_at"] = timestamp
-            templates.append(item)
-
     mappings = []
     for mapping in DEFAULT_FIELD_MAPPINGS:
         if any(_norm(alias) in normalized for alias in mapping["source_aliases"]):
@@ -594,7 +583,7 @@ def parse_experience_text(project: str, text: str, source: str = "manual", times
     mappings.extend(_parse_explicit_mappings(project, text, timestamp, source))
     return {
         "rules": [rule],
-        "activity_templates": _dedupe_records(templates, "template_id"),
+        "activity_templates": [],
         "field_mappings": _dedupe_records(mappings, "mapping_id"),
         "case_examples": [],
     }
@@ -985,8 +974,8 @@ def _render_ai_review_text(raw_text: str, ai_summary: dict[str, Any]) -> str:
 
 def _local_questions(records: dict[str, list[dict[str, Any]]], text: str) -> list[str]:
     questions = []
-    if not records.get("activity_templates"):
-        questions.append("这条经验对应哪类活动模板？例如兑换商店、积分任务、礼包、排行榜。")
+    if not _scenario_tags(text):
+        questions.append("如果这是新的活动类型，请到“活动模板”页签新建模板；历史经验不会自动创建模板。")
     if not records.get("field_mappings") and "->" not in text:
         questions.append("是否有规划列名到配置字段的映射？建议写成：规划列名 -> table.field。")
     if not _extract_table_names(text):
@@ -1179,7 +1168,7 @@ def _normalize_template_record(template: dict[str, Any], timestamp: str) -> dict
         "defaults": template.get("defaults") if isinstance(template.get("defaults"), dict) else {"review_required": True},
         "confidence": _clamp_confidence(template.get("confidence"), 0.72),
         "enabled": bool(template.get("enabled", True)),
-        "source": str(template.get("source") or "panel"),
+        "source": str(template.get("source") or "activity_template_panel"),
         "evidence": _string_list(template.get("evidence"))[:8],
         "created_at": str(template.get("created_at") or timestamp),
         "updated_at": timestamp,

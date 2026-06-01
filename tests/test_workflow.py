@@ -272,10 +272,10 @@ class WorkflowTests(unittest.TestCase):
                 "planning item_id is a goods id, price maps to exchange price, reward maps to reward id.",
             )
             self.assertEqual(result["created"]["rules"], 1)
-            self.assertGreaterEqual(result["created"]["activity_templates"], 1)
+            self.assertEqual(result["created"]["activity_templates"], 0)
             self.assertGreaterEqual(result["created"]["field_mappings"], 2)
             self.assertTrue((tmp / ".knowledge" / "rules.jsonl").exists())
-            self.assertTrue((tmp / ".knowledge" / "activity_templates.jsonl").read_text(encoding="utf-8").strip())
+            self.assertEqual((tmp / ".knowledge" / "activity_templates.jsonl").read_text(encoding="utf-8").strip(), "")
 
     def test_saved_experience_history_update_and_delete(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
