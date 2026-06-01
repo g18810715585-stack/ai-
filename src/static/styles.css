@@ -608,24 +608,20 @@ button:disabled {
   border-color: #b4483b;
 }
 
-.record-layout {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  height: 100%;
-  min-height: 0;
-  gap: 12px;
-}
-
 .case-review-box {
   display: grid;
   gap: 8px;
-  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 
+.persistent-case-review {
+  padding: 12px;
+  background: #fff;
+}
+
 .case-review-box textarea {
-  min-height: 110px;
-  max-height: 210px;
+  min-height: 96px;
+  max-height: 150px;
   font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
   font-size: 13px;
 }
@@ -920,7 +916,7 @@ button:disabled {
 
 .review-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
 }
 

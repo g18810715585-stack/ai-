@@ -141,18 +141,7 @@
           <pre id="relationsText"></pre>
         </div>
         <div id="recordTab" class="tab-content">
-          <div class="record-layout">
-            <pre id="recordText"></pre>
-            <section class="case-review-box">
-              <label>
-                本次问题修正
-                <textarea id="caseCorrectionText" spellcheck="false" placeholder="你本地检查表后，把这次配表所有问题写在这里。比如：哪些字段填错、哪些表漏配、为什么不符合你的习惯。"></textarea>
-              </label>
-              <div class="record-actions">
-                <button id="saveCaseReviewBtn" type="button" disabled>确认并总结为案例</button>
-              </div>
-            </section>
-          </div>
+          <pre id="recordText"></pre>
         </div>
         <div id="resultTab" class="tab-content">
           <pre id="resultText"></pre>
@@ -160,6 +149,15 @@
         <div id="rawTab" class="tab-content">
           <pre id="rawText"></pre>
         </div>
+        <section class="case-review-box persistent-case-review">
+          <label>
+            本次问题修正
+            <textarea id="caseCorrectionText" spellcheck="false" placeholder="你本地检查表后，把这次配表所有问题写在这里。比如：哪些字段填错、哪些表漏配、为什么不符合你的习惯。"></textarea>
+          </label>
+          <div class="record-actions">
+            <button id="saveCaseReviewBtn" type="button" disabled>确认并总结为案例</button>
+          </div>
+        </section>
       </section>
     </main>
 
