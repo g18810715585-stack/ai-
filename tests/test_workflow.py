@@ -576,6 +576,88 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(profiles["active_shop"]["next_values"]["id"], 103)
             self.assertEqual(profiles["active_shop"]["next_values"]["商品组"], 222)
 
+    def test_target_table_profiles_use_bottom_row_for_incremental_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            config_path = tmp / "active_shop.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "active_shop"
+            sheet.append(["id", "商品组", "商品"])
+            sheet.append([1, 10, 9001])
+            sheet.append([999, 888, 9002])
+            sheet.append([10, 11, 9003])
+            workbook.save(config_path)
+            manifest = Manifest.model_validate(
+                {
+                    "project": "profile-bottom-row",
+                    "mode": "supervised_write",
+                    "schema_path": str(ROOT / "config" / "example.schema.json"),
+                    "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx"}],
+                    "config_tables": {"active_shop": {"path": str(config_path), "sheet": "active_shop"}},
+                }
+            )
+            schema = SchemaBundle.model_validate(
+                {
+                    "version": 1,
+                    "tables": {
+                        "active_shop": {
+                            "primary_key": ["id"],
+                            "fields": {"id": {"type": "int"}, "商品组": {"type": "int"}, "商品": {"type": "int"}},
+                        }
+                    },
+                }
+            )
+
+            profile = build_target_table_profiles(manifest, schema, tmp)["active_shop"]
+            self.assertEqual(profile["fields"]["id"]["max_next_value"], 1000)
+            self.assertEqual(profile["fields"]["id"]["bottom_last_numeric"], 10)
+            self.assertEqual(profile["fields"]["id"]["next_value_basis"], "bottom_last_numeric")
+            self.assertEqual(profile["next_values"]["id"], 11)
+            self.assertEqual(profile["next_values"]["商品组"], 12)
+
+    def test_activity_profile_uses_last_regular_id_before_special_sections(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            config_path = tmp / "activity.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "activity"
+            sheet.append(["id", "活动备注", "活动标题"])
+            sheet.append([5483, "普通活动", "a"])
+            sheet.append([5484, "普通活动", "b"])
+            sheet.append([None, "以下为赛季活动（7位数id）", None])
+            sheet.append([2985, "S3清除危险（废弃）", "season old"])
+            sheet.append([20000101, "K2王国主活动", "kvk"])
+            sheet.append([20001003, "S5-贸易站活动", "season"])
+            workbook.save(config_path)
+            manifest = Manifest.model_validate(
+                {
+                    "project": "profile-activity",
+                    "mode": "supervised_write",
+                    "schema_path": str(ROOT / "config" / "example.schema.json"),
+                    "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx"}],
+                    "config_tables": {"activity": {"path": str(config_path), "sheet": "activity"}},
+                }
+            )
+            schema = SchemaBundle.model_validate(
+                {
+                    "version": 1,
+                    "tables": {
+                        "activity": {
+                            "primary_key": ["id"],
+                            "fields": {"id": {"type": "int"}, "活动备注": {"type": "str"}, "活动标题": {"type": "str"}},
+                        }
+                    },
+                }
+            )
+
+            profile = build_target_table_profiles(manifest, schema, tmp)["activity"]
+            self.assertEqual(profile["fields"]["id"]["activity_regular_last_numeric"], 5484)
+            self.assertEqual(profile["fields"]["id"]["bottom_last_numeric"], 20001003)
+            self.assertEqual(profile["fields"]["id"]["next_value_basis"], "activity_regular_section")
+            self.assertEqual(profile["next_values"]["id"], 5485)
+
     def test_active_shop_placeholders_are_filled_from_profiles(self) -> None:
         patch = Patch.model_validate(
             {
@@ -706,6 +788,78 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(patch.operations[1].rows[0]["reward_ref"], "5003|902|<NEW_GOODS_ID_001>")
         self.assertIn("<NEW_REWARD_ID_001>", result["filled"])
         self.assertEqual(result["skipped_fields"][0]["field"], "goods_id")
+
+    def test_allocator_corrects_concrete_activity_and_active_shop_ids_from_bottom_profiles(self) -> None:
+        patch = Patch.model_validate(
+            {
+                "patch_id": "correct-concrete-ids",
+                "project": "profile-bottom-row",
+                "operations": [
+                    {
+                        "op": "insert",
+                        "target_table": "activity",
+                        "rows": [{"id": "2441002", "活动形式模块": "7|10004|605092003|7|10005|605092004"}],
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "AI used max id",
+                        "confidence": 0.8,
+                        "risk_level": "medium",
+                    },
+                    {
+                        "op": "insert",
+                        "target_table": "active_shop",
+                        "rows": [
+                            {"id": "510133010", "商品组": "10004", "商品": "605300001"},
+                            {"id": "510133011", "商品组": "10004", "商品": "605300002"},
+                            {"id": "510133012", "商品组": "10005", "商品": "605300003"},
+                        ],
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "AI used max id",
+                        "confidence": 0.8,
+                        "risk_level": "medium",
+                    },
+                    {
+                        "op": "insert",
+                        "target_table": "reward",
+                        "rows": [{"id": "605300001"}],
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "reward uses a domain date rule",
+                        "confidence": 0.8,
+                        "risk_level": "medium",
+                    },
+                ],
+            }
+        )
+        context = {
+            "target_table_profiles": {
+                "activity": {
+                    "next_values": {"id": 5466},
+                    "generation_summary": {"allocatable_fields": ["id"]},
+                    "fields": {"id": {"allocation_role": "primary_key", "id_strategy": "new", "next_value_basis": "activity_regular_section"}},
+                },
+                "active_shop": {
+                    "next_values": {"id": 5005, "商品组": 532},
+                    "generation_summary": {"allocatable_fields": ["id", "商品组"]},
+                    "fields": {
+                        "id": {"allocation_role": "primary_key", "id_strategy": "", "next_value_basis": "bottom_last_numeric"},
+                        "商品组": {"allocation_role": "group_key", "id_strategy": "", "next_value_basis": "bottom_last_numeric"},
+                    },
+                },
+                "reward": {
+                    "next_values": {"id": 1012303},
+                    "generation_summary": {"allocatable_fields": ["id"]},
+                    "fields": {"id": {"allocation_role": "primary_key", "id_strategy": "new_or_reuse", "next_value_basis": "bottom_last_numeric"}},
+                },
+            }
+        }
+
+        result = fill_incremental_placeholders(patch, context)
+        self.assertEqual(patch.operations[0].rows[0]["id"], 5466)
+        self.assertEqual(patch.operations[0].rows[0]["活动形式模块"], "7|532|605092003|7|533|605092004")
+        active_rows = patch.operations[1].rows
+        self.assertEqual([row["id"] for row in active_rows], [5005, 5006, 5007])
+        self.assertEqual([row["商品组"] for row in active_rows], [532, 532, 533])
+        self.assertEqual(patch.operations[2].rows[0]["id"], "605300001")
+        self.assertGreaterEqual(len(result["corrected_fields"]), 5)
 
     def test_structured_correction_is_reused_in_experience_context(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

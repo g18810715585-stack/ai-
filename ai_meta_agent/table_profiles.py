@@ -9,10 +9,12 @@ from openpyxl import load_workbook
 from .models import Manifest, SchemaBundle, TableSchema, resolve_path
 
 PROFILE_SCAN_LIMIT = 5000
+BOTTOM_SCAN_LIMIT = 2000
 TAIL_ROW_LIMIT = 12
 SAMPLE_VALUE_LIMIT = 8
 ENUM_VALUE_LIMIT = 12
 PROFILE_FIELD_LIMIT = 80
+ACTIVITY_REGULAR_ID_LIMIT = 100000
 
 REFERENCE_KEYWORDS = (
     "id",
@@ -138,6 +140,10 @@ def _profile_table(
             if len(compact_row) > 1:
                 tail_rows.append(compact_row)
 
+        bottom_rows = _collect_bottom_rows(sheet, header_row, header_to_index, field_stats)
+        if bottom_rows:
+            tail_rows = deque(bottom_rows, maxlen=TAIL_ROW_LIMIT)
+
         fields = {field: _finalize_field_stat(stat, scanned_rows) for field, stat in field_stats.items()}
         allocatable_fields = [
             field
@@ -168,7 +174,7 @@ def _profile_table(
                 "allocatable_fields": allocatable_fields,
                 "lookup_fields": lookup_fields,
                 "enum_fields": enum_fields,
-                "note": "只对主键、组字段或字段字典标记为 new/new_or_reuse 的字段做确定性递增；外键类字段只作为查找上下文。",
+                "note": "只对主键、组字段或字段字典标记为 new/new_or_reuse 的字段做确定性递增；默认按表底最后有效数字继续递增，外键类字段只作为查找上下文。",
             },
             "fields": fields,
             "next_values": next_values,
@@ -231,6 +237,7 @@ def _empty_field_stat(
     allocation_role = _allocation_role(field, table, dictionary_entry, roles)
     return {
         "field": field,
+        "table": table_name,
         "roles": roles,
         "allocation_role": allocation_role,
         "id_strategy": dictionary_entry.get("id_strategy") or "",
@@ -244,6 +251,12 @@ def _empty_field_stat(
         "last_numeric_row": None,
         "last_value": None,
         "last_value_row": None,
+        "bottom_last_numeric": None,
+        "bottom_last_numeric_row": None,
+        "bottom_last_value": None,
+        "bottom_last_value_row": None,
+        "activity_regular_last_numeric": None,
+        "activity_regular_last_numeric_row": None,
         "_sample_values": [],
         "_distinct_values": set(),
         "_top_values": Counter(),
@@ -306,6 +319,62 @@ def _update_field_stat(stat: dict[str, Any], value: Any, row_index: int) -> None
         stat["min_numeric"] = numeric
 
 
+def _collect_bottom_rows(
+    sheet: Any,
+    header_row: int,
+    header_to_index: dict[str, int],
+    field_stats: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    max_row = sheet.max_row or header_row
+    min_row = max(header_row + 1, max_row - BOTTOM_SCAN_LIMIT + 1)
+    bottom_rows: deque[dict[str, Any]] = deque(maxlen=TAIL_ROW_LIMIT)
+    activity_regular_section_open = True
+    for row_index, raw in enumerate(sheet.iter_rows(min_row=min_row, values_only=True), start=min_row):
+        if _is_activity_season_marker(raw):
+            activity_regular_section_open = False
+        if not any(value not in (None, "") for value in raw):
+            continue
+        compact_row: dict[str, Any] = {"__row": row_index}
+        for field, stat in field_stats.items():
+            index = header_to_index[field]
+            value = _cell_value(raw[index] if index < len(raw) else None)
+            if value in (None, ""):
+                continue
+            compact_row[field] = value
+            _update_bottom_field_stat(stat, value, row_index, activity_regular_section_open)
+        if len(compact_row) > 1:
+            bottom_rows.append(compact_row)
+    return list(bottom_rows)
+
+
+def _update_bottom_field_stat(stat: dict[str, Any], value: Any, row_index: int, activity_regular_section_open: bool) -> None:
+    stat["bottom_last_value"] = value
+    stat["bottom_last_value_row"] = row_index
+    numeric = _numeric_value(value)
+    if numeric is None:
+        return
+    stat["bottom_last_numeric"] = numeric
+    stat["bottom_last_numeric_row"] = row_index
+    if (
+        activity_regular_section_open
+        and stat.get("table") == "activity"
+        and stat.get("field") == "id"
+        and numeric < ACTIVITY_REGULAR_ID_LIMIT
+    ):
+        stat["activity_regular_last_numeric"] = numeric
+        stat["activity_regular_last_numeric_row"] = row_index
+
+
+def _is_activity_season_marker(row: tuple[Any, ...]) -> bool:
+    for value in row:
+        if value is None:
+            continue
+        text = str(value)
+        if "以下为赛季活动" in text and "7位" in text:
+            return True
+    return False
+
+
 def _finalize_field_stat(stat: dict[str, Any], scanned_rows: int) -> dict[str, Any]:
     distinct_values = stat.pop("_distinct_values")
     top_values = stat.pop("_top_values")
@@ -317,9 +386,21 @@ def _finalize_field_stat(stat: dict[str, Any], scanned_rows: int) -> dict[str, A
     stat["sample_values"] = sample_values
     stat["top_values"] = [{"value": value, "count": count} for value, count in top_values.most_common(SAMPLE_VALUE_LIMIT)]
     if stat["max_numeric"] is not None:
-        stat["next_value"] = stat["max_numeric"] + 1
+        stat["max_next_value"] = stat["max_numeric"] + 1
+    else:
+        stat["max_next_value"] = None
+    if stat.get("table") == "activity" and stat.get("field") == "id" and stat["activity_regular_last_numeric"] is not None:
+        stat["next_value"] = stat["activity_regular_last_numeric"] + 1
+        stat["next_value_basis"] = "activity_regular_section"
+    elif stat["bottom_last_numeric"] is not None and stat.get("allocation_role") in {"primary_key", "group_key", "field_dictionary"}:
+        stat["next_value"] = stat["bottom_last_numeric"] + 1
+        stat["next_value_basis"] = "bottom_last_numeric"
+    elif stat["max_next_value"] is not None:
+        stat["next_value"] = stat["max_next_value"]
+        stat["next_value_basis"] = "max_numeric"
     else:
         stat["next_value"] = None
+        stat["next_value_basis"] = ""
     if 0 < len(distinct_values) <= ENUM_VALUE_LIMIT and (_looks_like_enum_field(stat["field"]) or len(distinct_values) <= 5):
         stat["enum_values"] = [item["value"] for item in stat["top_values"]]
     else:

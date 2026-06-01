@@ -244,7 +244,8 @@ def build_minimal_context(
             "If an activity template, field mappings, relationships, and planning rows provide enough evidence, generate a supervised patch even when some fields still need confirmation.",
             "Do not return an empty patch only because non-critical fields are missing; write the evidenced fields and leave uncertain values out or mark the operation high risk with needs_confirmation=true.",
             "Only return zero operations when there is no target table path, no usable primary key or insert row evidence, or the schema has no writable target table for the detected activity.",
-            "Use target_table_profiles as the current original-table state: next_values for generated primary keys/group keys, enum_values for valid existing options, tail_rows for recent writing style, and lookup fields only as reference evidence.",
+            "Use target_table_profiles as the current original-table state: next_values are based on the bottom-most existing data row for generated primary keys/group keys, enum_values for valid existing options, tail_rows for recent writing style, and lookup fields only as reference evidence.",
+            "For activity.id, target_table_profiles may use the last regular activity ID before the high-value season/cross-server ID region; follow next_value_basis instead of max_numeric.",
             "If a needed generated ID/group has no target_table_profiles baseline, return a placeholder plus a pending confirmation instead of inventing a number.",
         ],
         "schema": {
