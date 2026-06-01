@@ -49,7 +49,7 @@ from .experience import (
     update_saved_experience,
 )
 from .habits import append_habit, habit_from_patch, load_habits, match_habits
-from .id_allocator import fill_active_shop_incremental_ids
+from .id_allocator import fill_incremental_placeholders
 from .io_utils import make_run_dir, read_json, write_json, write_text
 from .item_resolution import compact_item_resolution, resolve_planning_items
 from .models import Manifest, Patch
@@ -193,7 +193,7 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
         auto_included_tables = []
     item_resolution = resolve_planning_items(manifest, workbooks)
     compact_items = compact_item_resolution(item_resolution)
-    target_table_profiles = build_target_table_profiles(manifest, schema, base_dir)
+    target_table_profiles = build_target_table_profiles(manifest, schema, base_dir, experience.get("field_dictionary_matches", []))
     context = build_minimal_context(
         manifest,
         schema,
@@ -516,7 +516,7 @@ def cmd_draft(args: argparse.Namespace) -> int:
         patch = make_stub_patch(manifest, schema, context, str(base_dir))
     else:
         patch = call_baseai(manifest, context, run_dir / "ai-response.json")
-    id_allocation = fill_active_shop_incremental_ids(patch, context)
+    id_allocation = fill_incremental_placeholders(patch, context)
     Patch.model_validate(patch.model_dump())
     write_json(run_dir / "patch.json", patch.model_dump(mode="json", exclude_none=True))
     write_json(run_dir / "id-allocation.json", id_allocation)

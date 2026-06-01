@@ -37,7 +37,7 @@ from ai_meta_agent.experience import (
 )
 from ai_meta_agent.feishu import FeishuSourcePayload, read_feishu_sheet
 from ai_meta_agent.habits import append_habit, habit_from_patch, load_habits, match_habits
-from ai_meta_agent.id_allocator import fill_active_shop_incremental_ids
+from ai_meta_agent.id_allocator import fill_active_shop_incremental_ids, fill_incremental_placeholders
 from ai_meta_agent.io_utils import read_json, write_json
 from ai_meta_agent.item_resolution import resolve_planning_items
 from ai_meta_agent.models import Manifest, Patch, PlanningSource, SchemaBundle, SheetIR, SourceKind, WorkbookIR
@@ -574,6 +574,97 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(patch.operations[1].rows[1]["商品组"], 223)
         self.assertIn("7|222|605092003|223|605092004", patch.operations[0].rows[0]["活动形式模块"])
         self.assertEqual(result["filled"]["<NEW_ACTIVE_SHOP_ID_001>"], 103)
+
+    def test_target_table_profiles_include_generic_context_and_safe_allocations(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            config_path = tmp / "reward.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "reward"
+            sheet.append(["id", "group_id", "goods_id", "type", "status"])
+            sheet.append([5001, 900, 30001, 1, "open"])
+            sheet.append([5002, 901, 30002, 1, "open"])
+            workbook.save(config_path)
+            manifest = Manifest.model_validate(
+                {
+                    "project": "profile-generic",
+                    "mode": "supervised_write",
+                    "schema_path": str(ROOT / "config" / "example.schema.json"),
+                    "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx"}],
+                    "config_tables": {"reward": {"path": str(config_path), "sheet": "reward"}},
+                }
+            )
+            schema = SchemaBundle.model_validate(
+                {
+                    "version": 1,
+                    "tables": {
+                        "reward": {
+                            "primary_key": ["id"],
+                            "group_key": "group_id",
+                            "fields": {
+                                "id": {"type": "int"},
+                                "group_id": {"type": "int"},
+                                "goods_id": {"type": "int"},
+                                "type": {"type": "int"},
+                                "status": {"type": "str"},
+                            },
+                        }
+                    },
+                }
+            )
+            dictionary = [{"target_table": "reward", "target_field": "goods_id", "id_strategy": "lookup", "reference_table": "goods", "writable": False}]
+
+            profiles = build_target_table_profiles(manifest, schema, tmp, dictionary)
+            profile = profiles["reward"]
+            self.assertEqual(profile["next_values"], {"id": 5003, "group_id": 902})
+            self.assertEqual(profile["fields"]["goods_id"]["reference_table"], "goods")
+            self.assertIn("lookup_ref", profile["fields"]["goods_id"]["roles"])
+            self.assertIn("open", profile["fields"]["status"]["enum_values"])
+
+    def test_generic_placeholder_allocator_skips_lookup_fields(self) -> None:
+        patch = Patch.model_validate(
+            {
+                "patch_id": "fill-generic",
+                "project": "profile-generic",
+                "operations": [
+                    {
+                        "op": "insert",
+                        "target_table": "reward",
+                        "rows": [{"id": "<NEW_REWARD_ID_001>", "group_id": "<NEW_REWARD_GROUP_001>", "goods_id": "<NEW_GOODS_ID_001>"}],
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "新增奖励",
+                        "confidence": 0.8,
+                        "risk_level": "medium",
+                    },
+                    {
+                        "op": "insert",
+                        "target_table": "activity",
+                        "rows": [{"id": 1, "reward_ref": "<NEW_REWARD_ID_001>|<NEW_REWARD_GROUP_001>|<NEW_GOODS_ID_001>"}],
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "引用奖励",
+                        "confidence": 0.8,
+                        "risk_level": "medium",
+                    },
+                ],
+            }
+        )
+        context = {
+            "target_table_profiles": {
+                "reward": {
+                    "next_values": {"id": 5003, "group_id": 902},
+                    "generation_summary": {"allocatable_fields": ["id", "group_id"]},
+                }
+            }
+        }
+
+        result = fill_incremental_placeholders(patch, context)
+        self.assertEqual(patch.operations[0].rows[0]["id"], 5003)
+        self.assertEqual(patch.operations[0].rows[0]["group_id"], 902)
+        self.assertEqual(patch.operations[0].rows[0]["goods_id"], "<NEW_GOODS_ID_001>")
+        self.assertEqual(patch.operations[1].rows[0]["reward_ref"], "5003|902|<NEW_GOODS_ID_001>")
+        self.assertIn("<NEW_REWARD_ID_001>", result["filled"])
+        self.assertEqual(result["skipped_fields"][0]["field"], "goods_id")
 
     def test_structured_correction_is_reused_in_experience_context(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
