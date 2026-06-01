@@ -5,6 +5,9 @@ from typing import Any
 from .habits import habit_context
 from .models import Habit, Manifest, SchemaBundle, WorkbookIR
 
+PLANNING_CONTEXT_SAMPLE_ROWS = 200
+VALUE_CONTEXT_SAMPLE_ROWS = 5000
+
 
 def _truncate(value: Any, limit: int = 300) -> Any:
     if isinstance(value, str):
@@ -27,12 +30,24 @@ def _compact_row(row: dict[str, Any], limit: int = 60) -> dict[str, Any]:
     return compact
 
 
+def _sample_row_limit(workbook: WorkbookIR) -> int:
+    source_hint = " ".join(
+        str(value or "").lower()
+        for value in [workbook.source_id, workbook.path, workbook.url]
+    )
+    if any(keyword in source_hint for keyword in ["item_base", "value", "价值"]):
+        return VALUE_CONTEXT_SAMPLE_ROWS
+    return PLANNING_CONTEXT_SAMPLE_ROWS
+
+
 def _compact_workbooks(workbooks: list[WorkbookIR]) -> list[dict[str, Any]]:
     result = []
     for workbook in workbooks:
+        sample_limit = _sample_row_limit(workbook)
         sheets = []
         for sheet in workbook.sheets:
             headers = [str(header).strip() for header in sheet.headers if str(header).strip()]
+            sample_rows = [_compact_row(row) for row in sheet.sample_rows[:sample_limit]]
             sheets.append(
                 {
                     "name": sheet.name,
@@ -43,7 +58,9 @@ def _compact_workbooks(workbooks: list[WorkbookIR]) -> list[dict[str, Any]]:
                     "hidden_rows": sheet.hidden_rows[:20],
                     "hidden_columns": sheet.hidden_columns[:20],
                     "merged_ranges": sheet.merged_ranges[:20],
-                    "sample_rows": [_compact_row(row) for row in sheet.sample_rows[:12]],
+                    "sample_row_count": len(sheet.sample_rows),
+                    "sample_rows_omitted": max(0, len(sheet.sample_rows) - len(sample_rows)),
+                    "sample_rows": sample_rows,
                 }
             )
         result.append(

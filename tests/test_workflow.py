@@ -413,6 +413,90 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(context["run_instruction"], manifest.run_instruction)
             self.assertIn("field_dictionary_matches", context)
 
+    def test_ai_context_keeps_more_planning_rows_for_corrections(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "context-row-sample",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx"}],
+            }
+        )
+        schema = SchemaBundle.model_validate(
+            {
+                "version": 1,
+                "tables": {
+                    "active_shop": {
+                        "primary_key": ["id"],
+                        "fields": {"id": {"type": "str"}, "商品": {"type": "str"}},
+                    }
+                },
+            }
+        )
+        rows = [{"__row": index, "商品": f"商品{index}"} for index in range(1, 251)]
+        workbook = WorkbookIR(
+            source_id="feishu-planning",
+            source_type=SourceKind.FEISHU,
+            sheets=[
+                SheetIR(
+                    name="兑换店规划",
+                    max_row=250,
+                    max_column=2,
+                    headers=["商品"],
+                    header_row=1,
+                    sample_rows=rows,
+                )
+            ],
+        )
+
+        context = build_minimal_context(manifest, schema, [workbook], [], None)
+        sample_rows = context["workbooks"][0]["sheets"][0]["sample_rows"]
+        self.assertIn(31, [row["__row"] for row in sample_rows])
+        self.assertEqual(len(sample_rows), 200)
+        self.assertEqual(context["workbooks"][0]["sheets"][0]["sample_row_count"], 250)
+        self.assertEqual(context["workbooks"][0]["sheets"][0]["sample_rows_omitted"], 50)
+
+    def test_ai_context_keeps_large_value_table_rows(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "context-value-sample",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [{"id": "value", "kind": "local_excel", "path": "dummy.xlsx", "role": "item_base"}],
+            }
+        )
+        schema = SchemaBundle.model_validate(
+            {
+                "version": 1,
+                "tables": {
+                    "reward": {
+                        "primary_key": ["id"],
+                        "fields": {"id": {"type": "str"}, "type_1": {"type": "str"}},
+                    }
+                },
+            }
+        )
+        rows = [{"__row": index, "商品名": f"商品{index}", "奖励类型": 7, "内容ID": index} for index in range(1, 5201)]
+        workbook = WorkbookIR(
+            source_id="feishu-value-table",
+            source_type=SourceKind.FEISHU,
+            sheets=[
+                SheetIR(
+                    name="价值表",
+                    max_row=5200,
+                    max_column=4,
+                    headers=["商品名", "奖励类型", "内容ID"],
+                    header_row=1,
+                    sample_rows=rows,
+                )
+            ],
+        )
+
+        context = build_minimal_context(manifest, schema, [workbook], [], None)
+        sheet = context["workbooks"][0]["sheets"][0]
+        self.assertEqual(len(sheet["sample_rows"]), 5000)
+        self.assertEqual(sheet["sample_rows_omitted"], 200)
+
     def test_structured_correction_is_reused_in_experience_context(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
