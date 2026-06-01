@@ -516,9 +516,9 @@ async function handleApi(req, res, projectRoot) {
     args = ["experience-summary", "--manifest", manifestPath, "--text", payload.experience_text || ""];
     projectStep = "experienceSummary";
   } else if (url.pathname === "/api/experience-list") {
-    args = ["experience-list", "--manifest", manifestPath];
+    args = ["experience-list"];
   } else if (url.pathname === "/api/experience-update") {
-    args = ["experience-update", "--manifest", manifestPath, "--experience-id", payload.experience_id || "", "--text", payload.experience_text || "", "--source", "panel"];
+    args = ["experience-update", "--experience-id", payload.experience_id || "", "--text", payload.experience_text || "", "--source", "panel"];
   } else if (url.pathname === "/api/experience-delete") {
     args = ["experience-delete", "--experience-id", payload.experience_id || ""];
   } else if (url.pathname === "/api/activity-template-list") {
