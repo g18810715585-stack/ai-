@@ -118,6 +118,7 @@ export function listProjects(projectRoot) {
       input_summary: {
         config_dir: project.inputs?.config_dir || "",
         planning_feishu_url: project.inputs?.planning_feishu_url || "",
+        run_instruction: project.inputs?.run_instruction || "",
         target_tables: project.inputs?.target_tables || []
       },
       latest_steps: Object.fromEntries(
@@ -185,6 +186,7 @@ export function extractProjectInputs(payload = {}) {
     config_dir: configRoot.path || "",
     planning_feishu_url: planning.url || "",
     item_base_feishu_url: itemBase.url || "",
+    run_instruction: manifest.run_instruction || "",
     target_tables: manifest.target_tables || [],
     ai_provider: manifest.ai?.provider || "",
     draft_mode: payload.stub === false ? "real" : payload.draft_mode || "",
@@ -238,7 +240,8 @@ function stepPaths(parsed) {
       patch: parsed.patch,
       result: parsed.result,
       configuration_record: parsed.configuration_record,
-      case_review: parsed.case_review
+      case_review: parsed.case_review,
+      structured_correction: parsed.structured_correction
     }).filter(([, value]) => Boolean(value))
   );
 }
@@ -283,9 +286,11 @@ function stepSummary(step, artifact = {}, parsed = {}) {
     };
   }
   if (step === "caseReview") {
+    const casePayload = artifact.caseReview?.case || artifact.caseReview || {};
     return {
-      decision: artifact.caseReview?.decision || "",
-      patch_id: artifact.caseReview?.patch_id || ""
+      decision: casePayload.decision || "",
+      patch_id: casePayload.patch_id || "",
+      structured_correction: artifact.structuredCorrection?.correction_id || artifact.caseReview?.structured_correction?.correction_id || ""
     };
   }
   if (step === "experienceSummary") {
@@ -333,7 +338,10 @@ function stepData(step, artifact = {}, parsed = {}) {
     };
   }
   if (step === "caseReview") {
-    return { caseReview: artifact.caseReview || parsed };
+    return {
+      caseReview: artifact.caseReview || parsed,
+      structuredCorrection: artifact.structuredCorrection || artifact.caseReview?.structured_correction || null
+    };
   }
   if (step === "experienceSummary") {
     return { experienceSummary: artifact.experienceSummary || null };

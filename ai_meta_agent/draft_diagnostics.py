@@ -46,6 +46,7 @@ def compact_draft_diagnostic_context(manifest: Manifest, context: dict[str, Any]
     return {
         "project": manifest.project,
         "mode": manifest.mode,
+        "run_instruction": manifest.run_instruction,
         "patch": {
             "patch_id": patch.patch_id,
             "operation_count": len(patch.operations),
@@ -62,6 +63,8 @@ def compact_draft_diagnostic_context(manifest: Manifest, context: dict[str, Any]
         },
         "relationship_map": _compact_relationship_map(context.get("relationship_map") or {}),
         "config_plan": context.get("config_plan", {}),
+        "field_dictionary_matches": (context.get("field_dictionary_matches") or [])[:30],
+        "structured_corrections": (context.get("structured_corrections") or [])[:10],
         "auto_included_target_tables": context.get("auto_included_target_tables", []),
         "source_errors": context.get("source_errors", []),
     }
@@ -108,7 +111,8 @@ def build_draft_diagnostics(
         reasons.append("AI 没有找到足够安全的规划字段到配置表字段映射。")
     if context.get("source_errors"):
         reasons.append("部分规划来源读取失败，草案生成只使用了已成功读取的内容。")
-    if _direct_header_match_count(workbooks, schema_tables) < 2:
+    dictionary_matches = context.get("field_dictionary_matches") or []
+    if _direct_header_match_count(workbooks, schema_tables) < 2 and len(dictionary_matches) < 2:
         reasons.append("规划表表头与目标配置表字段缺少直接重名或明显对应关系。")
     if recommended:
         reasons.append("已分析到关联表，但这些表尚未全部作为本次生成草案的目标表。")
@@ -118,7 +122,7 @@ def build_draft_diagnostics(
 
     missing = [
         "每条需要新增或修改配置的唯一 ID / 主键 / 可匹配条件。",
-        "规划表列名到配置表字段名的对应关系。",
+        "规划表列名到配置表字段名的对应关系，优先在字段字典中心补充来源列名。",
         "哪些表需要新增行，哪些表只是引用已有 ID。",
         "活动时间、活动类型、form/group/reward/goods/key 等关键索引字段的明确取值。",
     ]
@@ -143,6 +147,7 @@ def build_draft_diagnostics(
             "recommended_tables": relation_map.get("recommended_tables", [])[:20],
         },
         "config_plan": config_plan,
+        "field_dictionary_matches": dictionary_matches[:30],
         "next_steps": [
             "先把推荐关联表中本次活动会实际写入的表勾选进目标配置表。",
             "在飞书规划里补一段字段映射说明，例如：活动 ID -> activity.id，商品组 -> active_shop.group，奖励 -> reward.id。",

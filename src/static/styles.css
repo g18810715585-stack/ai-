@@ -193,6 +193,13 @@ textarea {
   line-height: 1.45;
 }
 
+.run-instruction {
+  min-height: 92px;
+  max-height: 180px;
+  font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+  font-size: 13px;
+}
+
 button {
   border: 1px solid #b8c4d0;
   border-radius: 6px;
@@ -674,6 +681,11 @@ button:disabled {
   box-shadow: 0 18px 55px rgba(22, 34, 46, 0.25);
 }
 
+.experience-panel {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: min(1220px, 100%);
+}
+
 .dialog-header,
 .dialog-footer {
   display: flex;
@@ -726,6 +738,120 @@ button:disabled {
 .common-editor textarea {
   min-height: 74px;
   max-height: 140px;
+}
+
+.compact-tools {
+  padding: 0 0 10px;
+  border-bottom: 0;
+}
+
+.experience-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.experience-tab {
+  min-width: 92px;
+  color: var(--muted);
+}
+
+.experience-tab.active {
+  border-color: var(--accent);
+  background: #eef8f5;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.experience-tab-panel {
+  display: none;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.experience-tab-panel.active {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+#experienceTemplatesPanel.active,
+#experienceDictionaryPanel.active {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.knowledge-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 1.1fr);
+  gap: 16px;
+  min-height: 0;
+  padding: 14px 16px 16px;
+  overflow: hidden;
+}
+
+.knowledge-layout > div,
+.knowledge-editor {
+  min-height: 0;
+}
+
+.knowledge-layout > div {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.knowledge-list {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.knowledge-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid #edf1f5;
+  border-radius: 0;
+  text-align: left;
+}
+
+.knowledge-item.active {
+  background: #eef8f5;
+  color: var(--accent);
+}
+
+.knowledge-item small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.knowledge-editor {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+}
+
+.compact-textarea {
+  min-height: 68px;
+  max-height: 130px;
+}
+
+.inline-check {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.inline-check input {
+  width: auto;
 }
 
 .icon-button {

@@ -71,6 +71,22 @@ def _compact_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_dictionary(entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "dictionary_id": entry.get("dictionary_id"),
+        "target_table": entry.get("target_table"),
+        "target_field": entry.get("target_field"),
+        "description": _truncate(entry.get("description"), 220),
+        "source_aliases": (entry.get("source_aliases") or [])[:8],
+        "matched_aliases": (entry.get("matched_aliases") or [])[:8],
+        "writable": entry.get("writable"),
+        "id_strategy": entry.get("id_strategy"),
+        "reference_table": entry.get("reference_table"),
+        "risk_note": _truncate(entry.get("risk_note"), 180),
+        "confidence": entry.get("confidence"),
+    }
+
+
 def _compact_rule(rule: dict[str, Any]) -> dict[str, Any]:
     return {
         "rule_id": rule.get("rule_id") or rule.get("experience_id"),
@@ -108,22 +124,42 @@ def _compact_case(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_correction(correction: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "correction_id": correction.get("correction_id"),
+        "activity_types": (correction.get("activity_types") or [])[:6],
+        "target_tables": (correction.get("target_tables") or [])[:12],
+        "target_fields": (correction.get("target_fields") or [])[:20],
+        "error_pattern": _truncate(correction.get("error_pattern"), 220),
+        "correct_practice": _truncate(correction.get("correct_practice"), 360),
+        "avoid_next_time": [_truncate(item, 160) for item in (correction.get("avoid_next_time") or [])[:6]],
+        "confidence": correction.get("confidence"),
+        "match_score": correction.get("match_score"),
+    }
+
+
 def _compact_config_plan(plan: dict[str, Any]) -> dict[str, Any]:
     return {
         "activity_type": plan.get("activity_type"),
         "activity_template_id": plan.get("activity_template_id"),
         "confidence": plan.get("confidence"),
+        "run_instruction": _truncate(plan.get("run_instruction"), 1200),
         "current_target_tables": plan.get("current_target_tables", []),
         "recommended_target_tables": plan.get("recommended_target_tables", [])[:16],
         "auto_included_target_tables": plan.get("auto_included_target_tables", []),
         "all_recommended_tables": plan.get("all_recommended_tables", [])[:24],
         "relation_chain": plan.get("relation_chain", [])[:16],
         "required_fields": plan.get("required_fields", {}),
+        "id_strategy": plan.get("id_strategy") or {},
         "matched_field_mappings": [_compact_mapping(item) for item in (plan.get("matched_field_mappings") or [])[:24]],
+        "field_dictionary_matches": [_compact_dictionary(item) for item in (plan.get("field_dictionary_matches") or [])[:30]],
         "matched_rules": [_compact_rule(item) for item in (plan.get("matched_rules") or [])[:10]],
         "similar_cases": [_compact_case(item) for item in (plan.get("similar_cases") or [])[:5]],
+        "similar_case_summaries": (plan.get("similar_case_summaries") or [])[:5],
+        "structured_corrections": [_compact_correction(item) for item in (plan.get("structured_corrections") or [])[:8]],
         "missing_information": [_truncate(item, 180) for item in (plan.get("missing_information") or [])[:10]],
         "pending_confirmations": (plan.get("pending_confirmations") or [])[:20],
+        "readiness": plan.get("readiness") or {},
         "planning_signals": {
             "sheet_names": (plan.get("planning_signals", {}).get("sheet_names") or [])[:12],
             "headers": (plan.get("planning_signals", {}).get("headers") or [])[:80],
@@ -138,8 +174,11 @@ def _compact_experience(experience: dict[str, Any] | None) -> dict[str, Any] | N
     return {
         "matched_activity_templates": [_compact_template(item) for item in experience.get("matched_activity_templates", [])[:5]],
         "matched_field_mappings": [_compact_mapping(item) for item in experience.get("matched_field_mappings", [])[:30]],
+        "field_dictionary_matches": [_compact_dictionary(item) for item in experience.get("field_dictionary_matches", [])[:40]],
         "matched_rules": [_compact_rule(item) for item in experience.get("matched_rules", [])[:12]],
         "similar_cases": [_compact_case(item) for item in experience.get("similar_cases", [])[:6]],
+        "similar_case_summaries": (experience.get("similar_case_summaries") or [])[:6],
+        "structured_corrections": [_compact_correction(item) for item in experience.get("structured_corrections", [])[:10]],
         "config_plan": _compact_config_plan(experience.get("config_plan") or {}),
     }
 
@@ -177,6 +216,7 @@ def build_minimal_context(
     context = {
         "project": manifest.project,
         "mode": manifest.mode,
+        "run_instruction": _truncate(manifest.run_instruction, 2000),
         "instructions": [
             "Return strict JSON matching Patch schema.",
             "Every operation must include target_table, source_ref, reason, confidence, risk_level.",

@@ -55,6 +55,7 @@ class Manifest(BaseModel):
     mode: Literal["readonly", "draft", "supervised_write", "auto_overwrite"] = "supervised_write"
     schema_path: str
     run_root: str = ".runs"
+    run_instruction: str = ""
     planning_sources: list[PlanningSource]
     config_tables: dict[str, ConfigTableRef] = Field(default_factory=dict)
     config_roots: list[ConfigRoot] = Field(default_factory=list)

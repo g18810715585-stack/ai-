@@ -30,13 +30,22 @@ from .draft_diagnostics import (
 from .draft_preview import build_draft_table_preview
 from .experience import (
     append_case_from_patch,
+    build_structured_correction,
     build_experience_context,
     delete_saved_experience,
+    delete_activity_template,
+    delete_field_dictionary_entry,
     experience_context_payload,
+    list_activity_templates,
+    list_field_dictionary,
     list_saved_experiences,
     merge_experience_summary,
+    save_structured_correction,
+    seed_field_dictionary_from_schema,
     summarize_experience_locally,
     teach_experience,
+    upsert_activity_template,
+    upsert_field_dictionary_entry,
     update_saved_experience,
 )
 from .habits import append_habit, habit_from_patch, load_habits, match_habits
@@ -122,6 +131,13 @@ def _ordered_unique(values: list[str]) -> list[str]:
             seen.add(name)
             result.append(name)
     return result
+
+
+def _json_arg(value: str) -> dict[str, Any]:
+    path = Path(value)
+    if path.exists():
+        return read_json(path)
+    return json.loads(value)
 
 
 def _auto_expand_generation_tables(manifest: Manifest, full_schema: Any, config_plan: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -327,6 +343,58 @@ def cmd_experience_delete(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_activity_template_list(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    print(json.dumps(list_activity_templates(base_dir), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_activity_template_upsert(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    result = upsert_activity_template(base_dir, _json_arg(args.template))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_activity_template_delete(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    result = delete_activity_template(base_dir, args.template_id)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_field_dictionary_list(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    print(json.dumps(list_field_dictionary(base_dir, table=args.table), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_field_dictionary_upsert(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    result = upsert_field_dictionary_entry(base_dir, _json_arg(args.entry))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_field_dictionary_delete(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    result = delete_field_dictionary_entry(base_dir, args.dictionary_id)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_field_dictionary_seed(args: argparse.Namespace) -> int:
+    base_dir = Path(args.base_dir).resolve()
+    manifest_path = Path(args.manifest)
+    if not manifest_path.is_absolute():
+        manifest_path = base_dir / manifest_path
+    manifest = _load_manifest(manifest_path)
+    schema = load_schema(_schema_path(base_dir, manifest))
+    result = seed_field_dictionary_from_schema(base_dir, schema)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     base_dir = Path(args.base_dir).resolve()
     manifest_path = Path(args.manifest)
@@ -352,6 +420,7 @@ def cmd_schema_scan(args: argparse.Namespace) -> int:
     manifest = _load_manifest(manifest_path)
     run_dir = make_run_dir(_run_root(base_dir, manifest), "schema-scan")
     result = scan_config_schema(manifest, base_dir, run_dir, sample_limit=args.sample_rows)
+    dictionary_seed = seed_field_dictionary_from_schema(base_dir, load_schema(run_dir / "schema-draft.json"))
     write_text(_run_root(base_dir, manifest) / "LATEST_SCHEMA_SCAN.txt", str(run_dir.resolve()))
     write_text(_run_root(base_dir, manifest) / "LATEST_SCHEMA_DRAFT.txt", str((run_dir / "schema-draft.json").resolve()))
     print(
@@ -363,6 +432,7 @@ def cmd_schema_scan(args: argparse.Namespace) -> int:
                 "table_count": result["report"]["table_count"],
                 "skipped_sheets": len(result["report"]["skipped_sheets"]),
                 "errors": len(result["report"]["errors"]),
+                "field_dictionary_created": dictionary_seed["created"],
             },
             ensure_ascii=False,
             indent=2,
@@ -632,14 +702,23 @@ def cmd_case_review(args: argparse.Namespace) -> int:
         review["ai_error"] = ai_error
 
     case = save_case_review(base_dir, manifest, patch, apply_result, correction_text, review)
-    payload = {"case": case, "case_review": review, "configuration_record": record}
+    structured_correction = build_structured_correction(manifest, patch, correction_text, review, record)
+    save_structured_correction(base_dir, structured_correction)
+    payload = {
+        "case": case,
+        "case_review": review,
+        "structured_correction": structured_correction,
+        "configuration_record": record,
+    }
     write_json(run_dir / "case-review.json", payload)
+    write_json(run_dir / "structured-correction.json", structured_correction)
     write_text(run_dir / "case-review.md", _case_review_markdown(case, review))
     print(
         json.dumps(
             {
                 "run_dir": str(run_dir),
                 "case_review": str(run_dir / "case-review.json"),
+                "structured_correction": str(run_dir / "structured-correction.json"),
                 "case_id": case["case_id"],
                 "mode": review["mode"],
                 "ai_error": ai_error,
@@ -716,6 +795,33 @@ def build_parser() -> argparse.ArgumentParser:
     experience_delete = sub.add_parser("experience-delete")
     experience_delete.add_argument("--experience-id", required=True)
     experience_delete.set_defaults(func=cmd_experience_delete)
+
+    template_list = sub.add_parser("activity-template-list")
+    template_list.set_defaults(func=cmd_activity_template_list)
+
+    template_upsert = sub.add_parser("activity-template-upsert")
+    template_upsert.add_argument("--template", required=True)
+    template_upsert.set_defaults(func=cmd_activity_template_upsert)
+
+    template_delete = sub.add_parser("activity-template-delete")
+    template_delete.add_argument("--template-id", required=True)
+    template_delete.set_defaults(func=cmd_activity_template_delete)
+
+    dictionary_list = sub.add_parser("field-dictionary-list")
+    dictionary_list.add_argument("--table", default=None)
+    dictionary_list.set_defaults(func=cmd_field_dictionary_list)
+
+    dictionary_upsert = sub.add_parser("field-dictionary-upsert")
+    dictionary_upsert.add_argument("--entry", required=True)
+    dictionary_upsert.set_defaults(func=cmd_field_dictionary_upsert)
+
+    dictionary_delete = sub.add_parser("field-dictionary-delete")
+    dictionary_delete.add_argument("--dictionary-id", required=True)
+    dictionary_delete.set_defaults(func=cmd_field_dictionary_delete)
+
+    dictionary_seed = sub.add_parser("field-dictionary-seed")
+    dictionary_seed.add_argument("--manifest", required=True)
+    dictionary_seed.set_defaults(func=cmd_field_dictionary_seed)
 
     plan = sub.add_parser("plan")
     plan.add_argument("--manifest", required=True)

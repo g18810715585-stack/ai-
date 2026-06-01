@@ -416,6 +416,7 @@ function collectArtifact(result) {
   if (parsed.result) artifact.result = maybeReadJson(parsed.result);
   if (parsed.configuration_record) artifact.configurationRecord = maybeReadJson(parsed.configuration_record);
   if (parsed.case_review) artifact.caseReview = maybeReadJson(parsed.case_review);
+  if (parsed.structured_correction) artifact.structuredCorrection = maybeReadJson(parsed.structured_correction);
   if (parsed.relationship_map) artifact.relationshipMap = maybeReadJson(parsed.relationship_map);
   if (parsed.planning_item_resolution) artifact.planningItemResolution = maybeReadJson(parsed.planning_item_resolution);
   if (parsed.schema_draft) artifact.schemaDraft = summarizeSchemaDraft(parsed.schema_draft);
@@ -429,6 +430,7 @@ function collectArtifact(result) {
     artifact.draftTablePreview = artifact.draftTablePreview || maybeReadJson(path.join(parsed.run_dir, "draft-table-preview.json"));
     artifact.configurationRecord = artifact.configurationRecord || maybeReadJson(path.join(parsed.run_dir, "configuration-record.json"));
     artifact.caseReview = artifact.caseReview || maybeReadJson(path.join(parsed.run_dir, "case-review.json"));
+    artifact.structuredCorrection = artifact.structuredCorrection || maybeReadJson(path.join(parsed.run_dir, "structured-correction.json"));
     artifact.diff = maybeReadJson(path.join(parsed.run_dir, "diff.json"));
     artifact.validation = maybeReadJson(path.join(parsed.run_dir, "validation.json"));
     artifact.rollback = maybeReadJson(path.join(parsed.run_dir, "rollback-patch.json"));
@@ -519,6 +521,24 @@ async function handleApi(req, res, projectRoot) {
     args = ["experience-update", "--manifest", manifestPath, "--experience-id", payload.experience_id || "", "--text", payload.experience_text || "", "--source", "panel"];
   } else if (url.pathname === "/api/experience-delete") {
     args = ["experience-delete", "--experience-id", payload.experience_id || ""];
+  } else if (url.pathname === "/api/activity-template-list") {
+    args = ["activity-template-list"];
+  } else if (url.pathname === "/api/activity-template-upsert") {
+    const templatePath = path.join(uploadRoot, "activity-template.json");
+    fs.writeFileSync(templatePath, JSON.stringify(payload.template || {}, null, 2), "utf8");
+    args = ["activity-template-upsert", "--template", templatePath];
+  } else if (url.pathname === "/api/activity-template-delete") {
+    args = ["activity-template-delete", "--template-id", payload.template_id || ""];
+  } else if (url.pathname === "/api/field-dictionary-list") {
+    args = ["field-dictionary-list", ...(payload.table ? ["--table", payload.table] : [])];
+  } else if (url.pathname === "/api/field-dictionary-upsert") {
+    const entryPath = path.join(uploadRoot, "field-dictionary-entry.json");
+    fs.writeFileSync(entryPath, JSON.stringify(payload.entry || {}, null, 2), "utf8");
+    args = ["field-dictionary-upsert", "--entry", entryPath];
+  } else if (url.pathname === "/api/field-dictionary-delete") {
+    args = ["field-dictionary-delete", "--dictionary-id", payload.dictionary_id || ""];
+  } else if (url.pathname === "/api/field-dictionary-seed") {
+    args = ["field-dictionary-seed", "--manifest", manifestPath];
   } else if (url.pathname === "/api/activity-plan") {
     args = ["plan", "--manifest", manifestPath];
     projectStep = "activityPlan";

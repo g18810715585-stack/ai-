@@ -15,14 +15,18 @@ KNOWLEDGE_FILES = {
     "rules": "rules.jsonl",
     "activity_templates": "activity_templates.jsonl",
     "field_mappings": "field_mappings.jsonl",
+    "field_dictionary": "field_dictionary.jsonl",
     "case_examples": "case_examples.jsonl",
+    "structured_corrections": "structured_corrections.jsonl",
 }
 
 RECORD_ID_FIELDS = {
     "rules": "rule_id",
     "activity_templates": "template_id",
     "field_mappings": "mapping_id",
+    "field_dictionary": "dictionary_id",
     "case_examples": "case_id",
+    "structured_corrections": "correction_id",
 }
 
 
@@ -59,6 +63,25 @@ DEFAULT_ACTIVITY_TEMPLATES: list[dict[str, Any]] = [
         },
         "defaults": {"review_required": True},
         "confidence": 0.68,
+        "evidence": ["builtin activity template"],
+    },
+    {
+        "template_id": "battle_pass",
+        "name": "BP 通行证活动",
+        "aliases": ["bp", "battlepass", "battle pass", "通行证", "战令", "赛季通行证"],
+        "target_tables": ["activity", "activity_task_target", "activity_point_mission", "exchange", "reward", "goods", "key"],
+        "relation_chain": ["activity", "activity_task_target", "activity_point_mission", "exchange", "reward", "goods", "key"],
+        "required_fields": {
+            "activity": ["id", "活动标题", "活动形式模块", "活动生效时间"],
+            "activity_task_target": ["id", "任务逻辑", "目标值"],
+            "activity_point_mission": ["任务id", "奖励", "积分"],
+            "exchange": ["唯一ID", "商品内容", "支付价格"],
+            "reward": ["id"],
+            "goods": ["道具ID"],
+        },
+        "id_strategy": "活动主 ID 通常新建；奖励、商品、文案按规划和历史活动判断新建或复用。",
+        "defaults": {"review_required": True},
+        "confidence": 0.7,
         "evidence": ["builtin activity template"],
     },
     {
@@ -179,6 +202,80 @@ DEFAULT_FIELD_MAPPINGS: list[dict[str, Any]] = [
 ]
 
 
+DEFAULT_FIELD_DICTIONARY: list[dict[str, Any]] = [
+    {
+        "dictionary_id": "builtin_activity_id",
+        "target_table": "activity",
+        "target_field": "id",
+        "description": "活动唯一 ID，本次活动没有明确复用旧活动时通常新建。",
+        "source_aliases": ["活动id", "活动ID", "活动编号", "活动"],
+        "writable": True,
+        "id_strategy": "new",
+        "reference_table": "",
+        "risk_note": "复用旧 ID 会影响旧活动，必须人工确认。",
+        "confidence": 0.82,
+        "enabled": True,
+        "source": "builtin",
+    },
+    {
+        "dictionary_id": "builtin_exchange_price",
+        "target_table": "exchange",
+        "target_field": "支付价格",
+        "description": "兑换或购买的消耗价格，来源通常是规划里的价格、售价、消耗数量。",
+        "source_aliases": ["价格", "售价", "支付价格", "消耗", "现价"],
+        "writable": True,
+        "id_strategy": "value",
+        "reference_table": "",
+        "risk_note": "货币类型和数量需要一起校验。",
+        "confidence": 0.78,
+        "enabled": True,
+        "source": "builtin",
+    },
+    {
+        "dictionary_id": "builtin_reward_id",
+        "target_table": "reward",
+        "target_field": "id",
+        "description": "奖励组 ID，规划出现新的奖励组合时倾向新建，复用时必须确认奖励内容完全一致。",
+        "source_aliases": ["奖励", "奖励内容", "奖励组", "礼包内容"],
+        "writable": True,
+        "id_strategy": "new_or_reuse",
+        "reference_table": "goods",
+        "risk_note": "奖励组复用错误会串到其他活动。",
+        "confidence": 0.8,
+        "enabled": True,
+        "source": "builtin",
+    },
+    {
+        "dictionary_id": "builtin_goods_id",
+        "target_table": "goods",
+        "target_field": "道具ID",
+        "description": "道具或商品内容 ID，优先从价值表/商品表按名称匹配。",
+        "source_aliases": ["道具id", "商品id", "物品id", "内容ID", "奖励ID"],
+        "writable": False,
+        "id_strategy": "lookup",
+        "reference_table": "goods",
+        "risk_note": "道具 ID 不应凭空编造，匹配不到时进入待确认。",
+        "confidence": 0.82,
+        "enabled": True,
+        "source": "builtin",
+    },
+    {
+        "dictionary_id": "builtin_key_text",
+        "target_table": "key",
+        "target_field": "UI_Title_001",
+        "description": "标题或描述文案 key，规划里出现新文案时新建，旧文案复用必须确认适用范围。",
+        "source_aliases": ["文案", "标题", "描述", "说明", "key"],
+        "writable": True,
+        "id_strategy": "new_or_reuse",
+        "reference_table": "",
+        "risk_note": "文案 key 复用会影响所有引用处。",
+        "confidence": 0.74,
+        "enabled": True,
+        "source": "builtin",
+    },
+]
+
+
 def knowledge_dir(base_dir: Path) -> Path:
     return base_dir / ".knowledge"
 
@@ -194,11 +291,15 @@ def ensure_knowledge_files(base_dir: Path) -> dict[str, str]:
 
 def load_experience(base_dir: Path) -> dict[str, list[dict[str, Any]]]:
     root = knowledge_dir(base_dir)
+    user_templates = _load_jsonl(root / KNOWLEDGE_FILES["activity_templates"])
+    user_dictionary = _load_jsonl(root / KNOWLEDGE_FILES["field_dictionary"])
     return {
         "rules": _load_jsonl(root / KNOWLEDGE_FILES["rules"]),
-        "activity_templates": [*DEFAULT_ACTIVITY_TEMPLATES, *_load_jsonl(root / KNOWLEDGE_FILES["activity_templates"])],
+        "activity_templates": _merge_records(DEFAULT_ACTIVITY_TEMPLATES, user_templates, "template_id"),
         "field_mappings": [*DEFAULT_FIELD_MAPPINGS, *_load_jsonl(root / KNOWLEDGE_FILES["field_mappings"])],
+        "field_dictionary": _merge_records(DEFAULT_FIELD_DICTIONARY, user_dictionary, "dictionary_id"),
         "case_examples": _load_jsonl(root / KNOWLEDGE_FILES["case_examples"]),
+        "structured_corrections": _load_jsonl(root / KNOWLEDGE_FILES["structured_corrections"]),
     }
 
 
@@ -311,6 +412,139 @@ def delete_saved_experience(base_dir: Path, experience_id: str) -> dict[str, Any
     _remove_experience_records(root, experience_id, record_refs)
     _write_jsonl(root / KNOWLEDGE_FILES["experiences"], kept)
     return {"store": str(root), "deleted": experience_id, "remaining": len(kept)}
+
+
+def list_activity_templates(base_dir: Path) -> dict[str, Any]:
+    root = knowledge_dir(base_dir)
+    user_records = _load_jsonl(root / KNOWLEDGE_FILES["activity_templates"])
+    builtin_ids = {item["template_id"] for item in DEFAULT_ACTIVITY_TEMPLATES}
+    templates = _merge_records(DEFAULT_ACTIVITY_TEMPLATES, user_records, "template_id")
+    for item in templates:
+        item["readonly"] = item.get("template_id") in builtin_ids and item.get("source", "builtin") == "builtin"
+    templates.sort(key=lambda item: (not item.get("enabled", True), -float(item.get("confidence", 0)), item.get("name", "")))
+    return {"store": str(root), "count": len(templates), "templates": templates}
+
+
+def upsert_activity_template(base_dir: Path, template: dict[str, Any]) -> dict[str, Any]:
+    root = knowledge_dir(base_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    now = _now()
+    normalized = _normalize_template_record(template, now)
+    path = root / KNOWLEDGE_FILES["activity_templates"]
+    records = _load_jsonl(path)
+    index = next((idx for idx, item in enumerate(records) if item.get("template_id") == normalized["template_id"]), -1)
+    if index >= 0:
+        normalized["created_at"] = records[index].get("created_at") or now
+        records[index] = normalized
+    else:
+        records.append(normalized)
+    _write_jsonl(path, records)
+    return {"store": str(root), "template": normalized}
+
+
+def delete_activity_template(base_dir: Path, template_id: str) -> dict[str, Any]:
+    root = knowledge_dir(base_dir)
+    path = root / KNOWLEDGE_FILES["activity_templates"]
+    records = _load_jsonl(path)
+    builtin = next((item for item in DEFAULT_ACTIVITY_TEMPLATES if item.get("template_id") == template_id), None)
+    kept = [item for item in records if item.get("template_id") != template_id]
+    if builtin:
+        disabled = dict(builtin)
+        disabled.update({"enabled": False, "source": "panel_disabled", "updated_at": _now()})
+        kept.append(disabled)
+    elif len(kept) == len(records):
+        raise ValueError(f"未找到活动模板：{template_id}")
+    _write_jsonl(path, kept)
+    return {"store": str(root), "deleted": template_id, "disabled_builtin": bool(builtin)}
+
+
+def list_field_dictionary(base_dir: Path, table: str | None = None) -> dict[str, Any]:
+    root = knowledge_dir(base_dir)
+    user_records = _load_jsonl(root / KNOWLEDGE_FILES["field_dictionary"])
+    builtin_ids = {item["dictionary_id"] for item in DEFAULT_FIELD_DICTIONARY}
+    entries = _merge_records(DEFAULT_FIELD_DICTIONARY, user_records, "dictionary_id")
+    if table:
+        entries = [item for item in entries if item.get("target_table") == table]
+    for item in entries:
+        item["readonly"] = item.get("dictionary_id") in builtin_ids and item.get("source", "builtin") == "builtin"
+    entries.sort(key=lambda item: (item.get("target_table", ""), item.get("target_field", "")))
+    return {"store": str(root), "count": len(entries), "field_dictionary": entries}
+
+
+def upsert_field_dictionary_entry(base_dir: Path, entry: dict[str, Any]) -> dict[str, Any]:
+    root = knowledge_dir(base_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    now = _now()
+    normalized = _normalize_dictionary_record(entry, now)
+    path = root / KNOWLEDGE_FILES["field_dictionary"]
+    records = _load_jsonl(path)
+    index = next((idx for idx, item in enumerate(records) if item.get("dictionary_id") == normalized["dictionary_id"]), -1)
+    if index >= 0:
+        normalized["created_at"] = records[index].get("created_at") or now
+        records[index] = normalized
+    else:
+        records.append(normalized)
+    _write_jsonl(path, records)
+    return {"store": str(root), "entry": normalized}
+
+
+def delete_field_dictionary_entry(base_dir: Path, dictionary_id: str) -> dict[str, Any]:
+    root = knowledge_dir(base_dir)
+    path = root / KNOWLEDGE_FILES["field_dictionary"]
+    records = _load_jsonl(path)
+    builtin = next((item for item in DEFAULT_FIELD_DICTIONARY if item.get("dictionary_id") == dictionary_id), None)
+    kept = [item for item in records if item.get("dictionary_id") != dictionary_id]
+    if builtin:
+        disabled = dict(builtin)
+        disabled.update({"enabled": False, "source": "panel_disabled", "updated_at": _now()})
+        kept.append(disabled)
+    elif len(kept) == len(records):
+        raise ValueError(f"未找到字段字典：{dictionary_id}")
+    _write_jsonl(path, kept)
+    return {"store": str(root), "deleted": dictionary_id, "disabled_builtin": bool(builtin)}
+
+
+def seed_field_dictionary_from_schema(base_dir: Path, schema: SchemaBundle) -> dict[str, Any]:
+    root = knowledge_dir(base_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / KNOWLEDGE_FILES["field_dictionary"]
+    records = _load_jsonl(path)
+    existing = {item.get("dictionary_id") for item in [*DEFAULT_FIELD_DICTIONARY, *records]}
+    now = _now()
+    created = []
+    for table_name, table in schema.tables.items():
+        field_names = _ordered_unique([*table.primary_key, *table.fields.keys()])
+        for field_name in field_names:
+            dictionary_id = _stable_id("field-dict", table_name, field_name)
+            if dictionary_id in existing:
+                continue
+            writable = (
+                table.ai_write_permission != "readonly"
+                and field_name not in table.block_update_fields
+                and (not table.allow_update_fields or field_name in table.allow_update_fields or field_name in table.primary_key)
+            )
+            created.append(
+                {
+                    "dictionary_id": dictionary_id,
+                    "target_table": table_name,
+                    "target_field": field_name,
+                    "description": "",
+                    "source_aliases": [field_name],
+                    "writable": writable,
+                    "id_strategy": "unknown",
+                    "reference_table": "",
+                    "risk_note": "从配置表 schema 自动生成，建议人工补充字段含义和来源规划列名。",
+                    "confidence": 0.55,
+                    "enabled": True,
+                    "source": "schema_scan",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            )
+            existing.add(dictionary_id)
+    if created:
+        _write_jsonl(path, [*records, *created])
+    return {"store": str(root), "created": len(created), "field_dictionary": created}
 
 
 def parse_experience_text(project: str, text: str, source: str = "manual", timestamp: str | None = None) -> dict[str, list[dict[str, Any]]]:
@@ -442,18 +676,34 @@ def build_experience_context(
     relationship_map: dict[str, Any],
 ) -> dict[str, Any]:
     store = load_experience(base_dir)
-    signals = planning_signals(workbooks)
+    signals = planning_signals(workbooks, manifest.run_instruction)
     target_tables = set(schema.tables.keys())
     templates = _match_templates(store["activity_templates"], signals, target_tables)
     field_mappings = _match_field_mappings(store["field_mappings"], signals, target_tables, schema)
+    field_dictionary = _match_field_dictionary(store["field_dictionary"], signals, target_tables, schema)
     rules = _match_rules(store["rules"], manifest.project, signals, target_tables)
     cases = _match_cases(store["case_examples"], manifest.project, signals, target_tables)
-    plan = build_config_plan(manifest, schema, relationship_map, templates, field_mappings, rules, cases, signals)
+    corrections = _match_structured_corrections(store["structured_corrections"], manifest.project, signals, target_tables)
+    plan = build_config_plan(
+        manifest,
+        schema,
+        relationship_map,
+        templates,
+        field_mappings,
+        field_dictionary,
+        rules,
+        cases,
+        corrections,
+        signals,
+    )
     return {
         "matched_activity_templates": templates[:5],
         "matched_field_mappings": field_mappings[:40],
+        "field_dictionary_matches": field_dictionary[:60],
         "matched_rules": rules[:20],
         "similar_cases": cases[:8],
+        "similar_case_summaries": _case_summaries(cases[:8]),
+        "structured_corrections": corrections[:12],
         "config_plan": plan,
         "knowledge_counts": {key: len(value) for key, value in store.items()},
     }
@@ -465,8 +715,10 @@ def build_config_plan(
     relationship_map: dict[str, Any],
     templates: list[dict[str, Any]],
     field_mappings: list[dict[str, Any]],
+    field_dictionary: list[dict[str, Any]],
     rules: list[dict[str, Any]],
     cases: list[dict[str, Any]],
+    corrections: list[dict[str, Any]],
     signals: dict[str, Any],
 ) -> dict[str, Any]:
     top_template = templates[0] if templates else None
@@ -476,12 +728,13 @@ def build_config_plan(
         *template_tables,
         *relationship_map.get("recommended_tables", []),
         *[table for mapping in field_mappings for table in [mapping.get("target_table")] if table],
+        *[entry.get("target_table") for entry in field_dictionary if entry.get("target_table")],
     ])
     missing = []
     if not top_template:
         missing.append("未识别出明确活动模板，请补充活动类型或写入一条经验规则。")
-    if not field_mappings:
-        missing.append("规划表字段没有命中字段映射，请说明规划列名对应哪些配置表字段。")
+    if not field_mappings and not field_dictionary:
+        missing.append("规划表字段没有命中字段映射或字段字典，请说明规划列名对应哪些配置表字段。")
     if any(table not in current_targets for table in recommended[:12]):
         missing.append("部分推荐关联表尚未加入目标配置表。")
     if not signals.get("headers"):
@@ -502,20 +755,53 @@ def build_config_plan(
                 }
             )
 
+    for entry in field_dictionary[:40]:
+        if entry.get("writable") is False:
+            pending.append(
+                {
+                    "type": "field_dictionary",
+                    "source_aliases": entry.get("source_aliases", []),
+                    "target_table": entry.get("target_table"),
+                    "target_field": entry.get("target_field"),
+                    "confidence": entry.get("confidence", 0),
+                    "reason": "字段字典标记为不可直接写入，需要人工确认来源或引用。",
+                }
+            )
+        elif entry.get("confidence", 0) < 0.72:
+            pending.append(
+                {
+                    "type": "field_dictionary",
+                    "source_aliases": entry.get("source_aliases", []),
+                    "target_table": entry.get("target_table"),
+                    "target_field": entry.get("target_field"),
+                    "confidence": entry.get("confidence", 0),
+                    "reason": "字段字典命中置信度偏低，需要确认规划列名和配置字段是否一致。",
+                }
+            )
+
+    readiness = _plan_readiness(top_template, field_mappings, field_dictionary, cases, corrections, current_targets, recommended, missing)
+    id_strategy = _id_strategy(top_template, field_dictionary, corrections)
+
     return {
         "activity_type": top_template.get("name") if top_template else "未识别",
         "activity_template_id": top_template.get("template_id") if top_template else None,
         "confidence": top_template.get("match_score", 0) if top_template else 0,
+        "run_instruction": manifest.run_instruction,
         "current_target_tables": current_targets,
         "recommended_target_tables": [table for table in recommended if table not in current_targets],
         "all_recommended_tables": recommended,
         "relation_chain": top_template.get("relation_chain", []) if top_template else [],
         "required_fields": top_template.get("required_fields", {}) if top_template else {},
+        "id_strategy": id_strategy,
         "matched_field_mappings": field_mappings[:40],
+        "field_dictionary_matches": field_dictionary[:60],
         "matched_rules": rules[:20],
         "similar_cases": cases[:8],
+        "similar_case_summaries": _case_summaries(cases[:8]),
+        "structured_corrections": corrections[:12],
         "missing_information": missing,
         "pending_confirmations": pending[:40],
+        "readiness": readiness,
         "planning_signals": {
             "sheet_names": signals.get("sheet_names", [])[:12],
             "headers": signals.get("headers", [])[:80],
@@ -546,7 +832,62 @@ def append_case_from_patch(base_dir: Path, manifest: Manifest, patch: Patch, dec
     return case
 
 
-def planning_signals(workbooks: list[WorkbookIR]) -> dict[str, Any]:
+def build_structured_correction(
+    manifest: Manifest,
+    patch: Patch,
+    correction_text: str,
+    review: dict[str, Any],
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    now = _now()
+    notes = _split_correction_notes(correction_text)
+    tables = _ordered_unique([*record.get("target_tables", []), *[operation.target_table for operation in patch.operations]])
+    fields = _ordered_unique(
+        [
+            field
+            for operation in patch.operations
+            for field in [*operation.set.keys(), *[key for row in operation.rows for key in row.keys()]]
+            if not str(field).startswith("__")
+        ]
+    )
+    return {
+        "correction_id": _stable_id("structured-correction", manifest.project, patch.patch_id, correction_text, now),
+        "project": manifest.project,
+        "patch_id": patch.patch_id,
+        "activity_types": _scenario_tags(" ".join([manifest.run_instruction, correction_text, str(review.get("summary", ""))])),
+        "target_tables": tables,
+        "target_fields": fields[:80],
+        "error_pattern": review.get("summary") or notes[0] if notes else correction_text[:160],
+        "correct_practice": "；".join(notes[:6]) or correction_text[:240],
+        "risk": "medium",
+        "avoid_next_time": _string_list(review.get("avoid_next_time"))[:8] or notes[:8],
+        "confidence": 0.76,
+        "enabled": True,
+        "source": "case_review",
+        "evidence": [correction_text[:600]],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def save_structured_correction(base_dir: Path, correction: dict[str, Any]) -> dict[str, Any]:
+    root = knowledge_dir(base_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / KNOWLEDGE_FILES["structured_corrections"]
+    records = _load_jsonl(path)
+    correction_id = correction.get("correction_id")
+    if not correction_id:
+        raise ValueError("结构化纠正规则缺少 correction_id")
+    existing_index = next((idx for idx, item in enumerate(records) if item.get("correction_id") == correction_id), -1)
+    if existing_index >= 0:
+        records[existing_index] = {**records[existing_index], **correction, "updated_at": _now()}
+    else:
+        records.append(correction)
+    _write_jsonl(path, records)
+    return {"store": str(path), "correction": correction}
+
+
+def planning_signals(workbooks: list[WorkbookIR], run_instruction: str = "") -> dict[str, Any]:
     sheet_names: list[str] = []
     headers: list[str] = []
     sample_values: list[str] = []
@@ -556,10 +897,11 @@ def planning_signals(workbooks: list[WorkbookIR]) -> dict[str, Any]:
             headers.extend(str(header) for header in sheet.headers if str(header).strip())
             for row in sheet.sample_rows[:8]:
                 sample_values.extend(str(value) for value in row.values() if str(value).strip())
-    text = "\n".join([*sheet_names, *headers, *sample_values])
+    text = "\n".join([run_instruction, *sheet_names, *headers, *sample_values])
     return {
         "sheet_names": _ordered_unique(sheet_names),
         "headers": _ordered_unique(headers),
+        "run_instruction": run_instruction,
         "text": text,
         "normalized_text": _norm(text),
     }
@@ -569,8 +911,11 @@ def experience_context_payload(experience: dict[str, Any]) -> dict[str, Any]:
     return {
         "matched_activity_templates": experience.get("matched_activity_templates", []),
         "matched_field_mappings": experience.get("matched_field_mappings", []),
+        "field_dictionary_matches": experience.get("field_dictionary_matches", []),
         "matched_rules": experience.get("matched_rules", []),
         "similar_cases": experience.get("similar_cases", []),
+        "similar_case_summaries": experience.get("similar_case_summaries", []),
+        "structured_corrections": experience.get("structured_corrections", []),
         "config_plan": experience.get("config_plan", {}),
     }
 
@@ -819,10 +1164,67 @@ def _string_list(value: Any) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
+def _normalize_template_record(template: dict[str, Any], timestamp: str) -> dict[str, Any]:
+    name = str(template.get("name") or template.get("activity_type") or "未命名活动模板").strip()
+    template_id = str(template.get("template_id") or _stable_id("template", name, timestamp)).strip()
+    return {
+        "template_id": template_id,
+        "name": name,
+        "aliases": _string_list(template.get("aliases")) or [name],
+        "target_tables": _string_list(template.get("target_tables")),
+        "relation_chain": _string_list(template.get("relation_chain")),
+        "required_fields": template.get("required_fields") if isinstance(template.get("required_fields"), dict) else {},
+        "id_strategy": str(template.get("id_strategy") or "").strip(),
+        "risk_notes": _string_list(template.get("risk_notes")),
+        "defaults": template.get("defaults") if isinstance(template.get("defaults"), dict) else {"review_required": True},
+        "confidence": _clamp_confidence(template.get("confidence"), 0.72),
+        "enabled": bool(template.get("enabled", True)),
+        "source": str(template.get("source") or "panel"),
+        "evidence": _string_list(template.get("evidence"))[:8],
+        "created_at": str(template.get("created_at") or timestamp),
+        "updated_at": timestamp,
+    }
+
+
+def _normalize_dictionary_record(entry: dict[str, Any], timestamp: str) -> dict[str, Any]:
+    table = str(entry.get("target_table") or entry.get("table") or "").strip()
+    field = str(entry.get("target_field") or entry.get("field") or "").strip()
+    if not table or not field:
+        raise ValueError("字段字典必须包含 target_table 和 target_field")
+    dictionary_id = str(entry.get("dictionary_id") or _stable_id("field-dict", table, field)).strip()
+    return {
+        "dictionary_id": dictionary_id,
+        "target_table": table,
+        "target_field": field,
+        "description": str(entry.get("description") or "").strip(),
+        "source_aliases": _string_list(entry.get("source_aliases")) or [field],
+        "writable": bool(entry.get("writable", True)),
+        "id_strategy": str(entry.get("id_strategy") or "unknown").strip(),
+        "reference_table": str(entry.get("reference_table") or "").strip(),
+        "risk_note": str(entry.get("risk_note") or "").strip(),
+        "confidence": _clamp_confidence(entry.get("confidence"), 0.72),
+        "enabled": bool(entry.get("enabled", True)),
+        "source": str(entry.get("source") or "panel"),
+        "evidence": _string_list(entry.get("evidence"))[:8],
+        "created_at": str(entry.get("created_at") or timestamp),
+        "updated_at": timestamp,
+    }
+
+
+def _clamp_confidence(value: Any, fallback: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = fallback
+    return round(max(0.0, min(0.99, number)), 3)
+
+
 def _match_templates(templates: list[dict[str, Any]], signals: dict[str, Any], target_tables: set[str]) -> list[dict[str, Any]]:
     text = signals.get("normalized_text", "")
     scored = []
     for template in templates:
+        if not template.get("enabled", True):
+            continue
         score = float(template.get("confidence", 0.5))
         hits = [alias for alias in template.get("aliases", []) if _norm(alias) in text]
         if hits:
@@ -836,6 +1238,42 @@ def _match_templates(templates: list[dict[str, Any]], signals: dict[str, Any], t
             item["matched_aliases"] = hits[:8]
             scored.append(item)
     return sorted(scored, key=lambda item: (-item["match_score"], item.get("name", "")))
+
+
+def _match_field_dictionary(
+    entries: list[dict[str, Any]],
+    signals: dict[str, Any],
+    target_tables: set[str],
+    schema: SchemaBundle,
+) -> list[dict[str, Any]]:
+    text = signals.get("normalized_text", "")
+    headers = {_norm(header) for header in signals.get("headers", [])}
+    scored = []
+    for entry in entries:
+        if not entry.get("enabled", True):
+            continue
+        table = entry.get("target_table")
+        field = entry.get("target_field")
+        if table not in target_tables or not _field_exists(schema, table, field):
+            continue
+        aliases = _ordered_unique([str(field), *entry.get("source_aliases", [])])
+        hits = [alias for alias in aliases if _norm(alias) and (_norm(alias) in text or _norm(alias) in headers)]
+        if not hits and entry.get("source") != "builtin":
+            continue
+        score = float(entry.get("confidence", 0.55))
+        if hits:
+            score += min(0.2, len(hits) * 0.05)
+        if table in target_tables:
+            score += 0.04
+        if entry.get("writable") is False:
+            score -= 0.04
+        if score < 0.5:
+            continue
+        item = dict(entry)
+        item["confidence"] = round(max(0.0, min(score, 0.98)), 3)
+        item["matched_aliases"] = hits[:8]
+        scored.append(item)
+    return sorted(scored, key=lambda item: (-item["confidence"], item.get("target_table", ""), item.get("target_field", "")))
 
 
 def _match_field_mappings(
@@ -919,6 +1357,116 @@ def _match_cases(cases: list[dict[str, Any]], project: str, signals: dict[str, A
             item["match_score"] = round(min(score, 0.98), 3)
             scored.append(item)
     return sorted(scored, key=lambda item: (-item["match_score"], item.get("created_at", "")))
+
+
+def _match_structured_corrections(
+    corrections: list[dict[str, Any]],
+    project: str,
+    signals: dict[str, Any],
+    target_tables: set[str],
+) -> list[dict[str, Any]]:
+    text = signals.get("normalized_text", "")
+    scored = []
+    for correction in corrections:
+        if not correction.get("enabled", True):
+            continue
+        score = float(correction.get("confidence", 0.55))
+        if correction.get("project") == project:
+            score += 0.08
+        overlap = len(set(correction.get("target_tables", [])) & target_tables)
+        if overlap:
+            score += min(0.18, overlap * 0.06)
+        corpus = _norm(" ".join(_string_list(correction.get("activity_types")) + _string_list(correction.get("target_fields"))))
+        if corpus and corpus in text:
+            score += 0.12
+        if score >= 0.55 and (overlap or correction.get("project") == project):
+            item = dict(correction)
+            item["match_score"] = round(min(score, 0.98), 3)
+            scored.append(item)
+    return sorted(scored, key=lambda item: (-item["match_score"], item.get("updated_at", item.get("created_at", ""))))
+
+
+def _case_summaries(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summaries = []
+    for case in cases:
+        review = case.get("case_review") or {}
+        summaries.append(
+            {
+                "case_id": case.get("case_id"),
+                "patch_id": case.get("patch_id"),
+                "decision": case.get("decision"),
+                "target_tables": (case.get("target_tables") or [])[:12],
+                "operation_count": case.get("operation_count"),
+                "summary": review.get("summary") or case.get("note"),
+                "lessons": _string_list(review.get("lessons"))[:5],
+                "avoid_next_time": _string_list(review.get("avoid_next_time"))[:5],
+                "match_score": case.get("match_score"),
+            }
+        )
+    return summaries
+
+
+def _plan_readiness(
+    template: dict[str, Any] | None,
+    mappings: list[dict[str, Any]],
+    dictionary: list[dict[str, Any]],
+    cases: list[dict[str, Any]],
+    corrections: list[dict[str, Any]],
+    current_targets: list[str],
+    recommended: list[str],
+    missing: list[str],
+) -> dict[str, Any]:
+    score = 0
+    if template:
+        score += 30
+    if mappings:
+        score += min(25, len(mappings) * 4)
+    if dictionary:
+        score += min(20, len(dictionary) * 2)
+    if current_targets:
+        score += 10
+    if cases or corrections:
+        score += 10
+    if recommended and not any(table not in current_targets for table in recommended[:8]):
+        score += 5
+    blockers = [item for item in missing if "未识别" in item or "字段映射" in item]
+    if blockers:
+        score = min(score, 65)
+    status = "ready" if score >= 75 and not blockers else "needs_review" if score >= 55 else "needs_info"
+    return {"score": score, "status": status, "blockers": blockers[:6]}
+
+
+def _id_strategy(
+    template: dict[str, Any] | None,
+    dictionary: list[dict[str, Any]],
+    corrections: list[dict[str, Any]],
+) -> dict[str, Any]:
+    by_table: dict[str, list[dict[str, Any]]] = {}
+    for entry in dictionary:
+        strategy = entry.get("id_strategy")
+        if not strategy or strategy == "unknown":
+            continue
+        by_table.setdefault(entry.get("target_table"), []).append(
+            {
+                "field": entry.get("target_field"),
+                "strategy": strategy,
+                "risk_note": entry.get("risk_note"),
+                "confidence": entry.get("confidence"),
+            }
+        )
+    return {
+        "template_rule": template.get("id_strategy") if template else "",
+        "field_rules": by_table,
+        "correction_rules": [
+            {
+                "correction_id": item.get("correction_id"),
+                "correct_practice": item.get("correct_practice"),
+                "avoid_next_time": item.get("avoid_next_time"),
+                "match_score": item.get("match_score"),
+            }
+            for item in corrections[:6]
+        ],
+    }
 
 
 def _parse_explicit_mappings(project: str, text: str, timestamp: str, source: str) -> list[dict[str, Any]]:
@@ -1103,6 +1651,21 @@ def _write_jsonl(path: Path, items: list[dict[str, Any]]) -> None:
             handle.write("\n")
 
 
+def _merge_records(defaults: list[dict[str, Any]], records: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for item in defaults:
+        item_key = item.get(key)
+        if item_key:
+            merged[str(item_key)] = dict(item)
+    for item in records:
+        item_key = item.get(key)
+        if not item_key:
+            continue
+        previous = merged.get(str(item_key), {})
+        merged[str(item_key)] = {**previous, **item}
+    return list(merged.values())
+
+
 def _dedupe_records(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     result = {}
     for item in items:
@@ -1119,6 +1682,12 @@ def _ordered_unique(values: list[Any]) -> list[Any]:
         seen.add(value)
         result.append(value)
     return result
+
+
+def _split_correction_notes(text: str) -> list[str]:
+    chunks = re.split(r"[\n；;]+", text)
+    notes = [chunk.strip(" -\t。") for chunk in chunks if chunk.strip(" -\t。")]
+    return notes or ([text.strip()] if text.strip() else [])
 
 
 def _stable_id(prefix: str, *parts: Any) -> str:

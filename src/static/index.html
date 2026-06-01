@@ -45,6 +45,11 @@
         </label>
 
         <label>
+          本次配表指令
+          <textarea id="runInstruction" class="run-instruction" spellcheck="false" placeholder="只写本次活动的特殊要求，例如：活动ID 123456；参考上期夏日兑换店；奖励组新建，商品ID从价值表匹配；活动时间复用规划表。"></textarea>
+        </label>
+
+        <label>
           配置表目录
           <input id="configDir" placeholder="例如 C:\TopHero\Meta\meta_local" />
         </label>
@@ -207,40 +212,112 @@
           <button id="closeExperienceDialog" class="icon-button" type="button" aria-label="关闭">×</button>
         </header>
 
-        <section class="experience-entry experience-create">
-          <label>
-            新增经验
-            <textarea id="experienceText" spellcheck="false" placeholder="例如：兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key。规划里商品名通常对应 goods 道具名，价格列对应 exchange 支付价格。"></textarea>
-          </label>
-          <div class="experience-actions">
-            <button id="teachBtn" type="button">AI 整理经验</button>
-            <button id="saveExperienceBtn" type="button" disabled>保存经验</button>
-          </div>
-          <label class="experience-summary">
-            整理结果
-            <textarea id="experienceSummaryText" spellcheck="false" placeholder="AI 整理后会显示在这里，你可以修改后再保存。"></textarea>
-          </label>
-          <div id="experienceConflictPanel" class="experience-conflict" hidden>
-            <strong>检测到可能冲突</strong>
-            <pre id="experienceConflictText"></pre>
-          </div>
-        </section>
+        <nav class="experience-tabs" aria-label="经验中心">
+          <button class="experience-tab active" data-experience-tab="history" type="button">历史经验</button>
+          <button class="experience-tab" data-experience-tab="templates" type="button">活动模板</button>
+          <button class="experience-tab" data-experience-tab="dictionary" type="button">字段字典</button>
+        </nav>
 
-        <div class="dialog-tools">
-          <input id="experienceSearch" placeholder="搜索标题、内容、来源或项目" />
-          <button id="refreshExperienceList" type="button">刷新经验</button>
-        </div>
-
-        <div class="experience-history">
-          <div id="experienceList" class="experience-list"></div>
-          <section class="experience-editor">
-            <div id="experienceMeta" class="experience-meta">请选择一条经验。</div>
-            <textarea id="experienceEditText" spellcheck="false" placeholder="选择历史经验后可以在这里修改。"></textarea>
-            <div class="history-actions">
-              <button id="updateExperienceBtn" type="button" disabled>保存修改</button>
-              <button id="deleteExperienceBtn" type="button" disabled>删除经验</button>
+        <div id="experienceHistoryPanel" class="experience-tab-panel active">
+          <section class="experience-entry experience-create">
+            <label>
+              新增经验
+              <textarea id="experienceText" spellcheck="false" placeholder="例如：兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key。规划里商品名通常对应 goods 道具名，价格列对应 exchange 支付价格。"></textarea>
+            </label>
+            <div class="experience-actions">
+              <button id="teachBtn" type="button">AI 整理经验</button>
+              <button id="saveExperienceBtn" type="button" disabled>保存经验</button>
+            </div>
+            <label class="experience-summary">
+              整理结果
+              <textarea id="experienceSummaryText" spellcheck="false" placeholder="AI 整理后会显示在这里，你可以修改后再保存。"></textarea>
+            </label>
+            <div id="experienceConflictPanel" class="experience-conflict" hidden>
+              <strong>检测到可能冲突</strong>
+              <pre id="experienceConflictText"></pre>
             </div>
           </section>
+
+          <div class="dialog-tools">
+            <input id="experienceSearch" placeholder="搜索标题、内容、来源或项目" />
+            <button id="refreshExperienceList" type="button">刷新经验</button>
+          </div>
+
+          <div class="experience-history">
+            <div id="experienceList" class="experience-list"></div>
+            <section class="experience-editor">
+              <div id="experienceMeta" class="experience-meta">请选择一条经验。</div>
+              <textarea id="experienceEditText" spellcheck="false" placeholder="选择历史经验后可以在这里修改。"></textarea>
+              <div class="history-actions">
+                <button id="updateExperienceBtn" type="button" disabled>保存修改</button>
+                <button id="deleteExperienceBtn" type="button" disabled>删除经验</button>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div id="experienceTemplatesPanel" class="experience-tab-panel">
+          <div class="knowledge-layout">
+            <div>
+              <div class="dialog-tools compact-tools">
+                <input id="templateSearch" placeholder="搜索模板、别名或目标表" />
+                <button id="refreshTemplateList" type="button">刷新模板</button>
+                <button id="newTemplateBtn" type="button">新建模板</button>
+              </div>
+              <div id="templateList" class="knowledge-list"></div>
+            </div>
+            <section class="knowledge-editor">
+              <label>模板名称<input id="templateName" placeholder="例如 兑换店" /></label>
+              <label>别名<textarea id="templateAliases" class="compact-textarea" spellcheck="false" placeholder="每行一个别名"></textarea></label>
+              <label>常用目标表<textarea id="templateTargetTables" class="compact-textarea" spellcheck="false" placeholder="每行一个表名"></textarea></label>
+              <label>表链路<textarea id="templateRelationChain" class="compact-textarea" spellcheck="false" placeholder="activity -> active_shop -> exchange -> reward"></textarea></label>
+              <label>ID 规则<textarea id="templateIdStrategy" class="compact-textarea" spellcheck="false" placeholder="活动ID新建，奖励组按内容判断新建或复用"></textarea></label>
+              <label>风险提示<textarea id="templateRiskNotes" class="compact-textarea" spellcheck="false" placeholder="每行一条"></textarea></label>
+              <label class="inline-check"><input id="templateEnabled" type="checkbox" checked /> 启用模板</label>
+              <div class="history-actions">
+                <button id="saveTemplateBtn" type="button">保存模板</button>
+                <button id="deleteTemplateBtn" type="button" disabled>删除/禁用模板</button>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div id="experienceDictionaryPanel" class="experience-tab-panel">
+          <div class="knowledge-layout">
+            <div>
+              <div class="dialog-tools compact-tools">
+                <input id="dictionarySearch" placeholder="搜索表名、字段、别名或说明" />
+                <button id="refreshDictionaryList" type="button">刷新字典</button>
+                <button id="newDictionaryBtn" type="button">新建字段</button>
+                <button id="seedDictionaryBtn" type="button">从 Schema 补齐</button>
+              </div>
+              <div id="dictionaryList" class="knowledge-list"></div>
+            </div>
+            <section class="knowledge-editor">
+              <label>目标表<input id="dictionaryTable" placeholder="activity" /></label>
+              <label>目标字段<input id="dictionaryField" placeholder="id" /></label>
+              <label>字段说明<textarea id="dictionaryDescription" class="compact-textarea" spellcheck="false" placeholder="这个字段是什么，通常从规划哪里来"></textarea></label>
+              <label>规划列名别名<textarea id="dictionaryAliases" class="compact-textarea" spellcheck="false" placeholder="每行一个别名，例如 商品名 / 道具名"></textarea></label>
+              <label>ID 策略
+                <select id="dictionaryIdStrategy">
+                  <option value="unknown">待确认</option>
+                  <option value="new">新建</option>
+                  <option value="reuse">复用</option>
+                  <option value="new_or_reuse">新建或复用</option>
+                  <option value="lookup">查表匹配</option>
+                  <option value="value">直接取值</option>
+                </select>
+              </label>
+              <label>关联表<input id="dictionaryReferenceTable" placeholder="reward / goods / key" /></label>
+              <label>风险说明<textarea id="dictionaryRiskNote" class="compact-textarea" spellcheck="false" placeholder="写错这个字段会有什么风险"></textarea></label>
+              <label class="inline-check"><input id="dictionaryWritable" type="checkbox" checked /> 允许 AI 草案写入</label>
+              <label class="inline-check"><input id="dictionaryEnabled" type="checkbox" checked /> 启用字段字典</label>
+              <div class="history-actions">
+                <button id="saveDictionaryBtn" type="button">保存字段</button>
+                <button id="deleteDictionaryBtn" type="button" disabled>删除/禁用字段</button>
+              </div>
+            </section>
+          </div>
         </div>
       </section>
     </div>

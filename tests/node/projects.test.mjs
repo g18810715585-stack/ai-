@@ -18,12 +18,13 @@ test("projects can be created, listed, read, and updated", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-meta-agent-projects-"));
   const project = createProject(dir, {
     name: "航海节兑换店",
-    inputs: { config_dir: "C:\\TopHero\\Meta", target_tables: ["activity"] }
+    inputs: { config_dir: "C:\\TopHero\\Meta", run_instruction: "活动ID新建", target_tables: ["activity"] }
   });
 
   assert.match(project.project_id, /^[a-z0-9][a-z0-9_-]{5,79}$/);
   assert.equal(project.name, "航海节兑换店");
   assert.equal(readProject(dir, project.project_id).inputs.config_dir, "C:\\TopHero\\Meta");
+  assert.equal(readProject(dir, project.project_id).inputs.run_instruction, "活动ID新建");
 
   const updated = updateProject(dir, project.project_id, {
     inputs: { target_tables: ["activity", "active_shop"] },
@@ -36,6 +37,7 @@ test("projects can be created, listed, read, and updated", () => {
   assert.equal(listed.length, 1);
   assert.equal(listed[0].project_id, project.project_id);
   assert.deepEqual(listed[0].input_summary.target_tables, ["activity", "active_shop"]);
+  assert.equal(listed[0].input_summary.run_instruction, "活动ID新建");
 });
 
 test("project manifest patch redirects run root into the project workspace", () => {
@@ -73,6 +75,7 @@ test("workflow run records latest step data and keeps history", () => {
       stub: true,
       manifest: {
         config_roots: [{ path: "C:\\TopHero\\Meta", recursive: true }],
+        run_instruction: "本次礼包奖励组新建",
         target_tables: ["activity"],
         ai: { provider: "chatgpt" }
       }
@@ -83,6 +86,7 @@ test("workflow run records latest step data and keeps history", () => {
   assert.equal(recorded.steps.draft.paths.patch, patchPath);
   assert.equal(recorded.steps.draft.data.patch.patch_id, "p1");
   assert.equal(recorded.inputs.config_dir, "C:\\TopHero\\Meta");
+  assert.equal(recorded.inputs.run_instruction, "本次礼包奖励组新建");
   assert.deepEqual(recorded.inputs.target_tables, ["activity"]);
   assert.equal(recorded.history[0].step, "draft");
 });

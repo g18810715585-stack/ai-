@@ -13,6 +13,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import PatternFill
 
+from ai_meta_agent.ai_context import build_minimal_context
 from ai_meta_agent.cli import _auto_expand_generation_tables, analyze_manifest
 from ai_meta_agent.configuration_records import build_configuration_record, local_case_review, save_case_review
 from ai_meta_agent.draft import call_baseai, call_draft_diagnostics_ai, call_experience_summary_ai, call_relationship_ai, make_stub_patch
@@ -20,12 +21,18 @@ from ai_meta_agent.draft_diagnostics import build_draft_diagnostics, compact_dra
 from ai_meta_agent.draft_preview import build_draft_table_preview
 from ai_meta_agent.experience import (
     append_case_from_patch,
+    build_structured_correction,
     build_experience_context,
     delete_saved_experience,
+    list_activity_templates,
+    list_field_dictionary,
     list_saved_experiences,
     merge_experience_summary,
+    save_structured_correction,
+    seed_field_dictionary_from_schema,
     summarize_experience_locally,
     teach_experience,
+    upsert_field_dictionary_entry,
     update_saved_experience,
 )
 from ai_meta_agent.feishu import FeishuSourcePayload, read_feishu_sheet
@@ -346,6 +353,117 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(local["has_conflicts"])
         self.assertEqual(local["conflicts"][0]["conflict_type"], "field_mapping")
         self.assertEqual(local["conflicts"][0]["existing_experience_id"], "exp_old")
+
+    def test_run_instruction_template_dictionary_and_context(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            manifest = Manifest.model_validate(
+                {
+                    "project": "bp-sample",
+                    "mode": "supervised_write",
+                    "schema_path": str(ROOT / "config" / "example.schema.json"),
+                    "run_instruction": "本次是 BP 通行证活动，活动 ID 新建，奖励组按规划新建。",
+                    "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx"}],
+                    "target_tables": ["activity", "activity_task_target", "activity_point_mission", "reward"],
+                }
+            )
+            schema = SchemaBundle.model_validate(
+                {
+                    "version": 1,
+                    "tables": {
+                        "activity": {"primary_key": ["id"], "fields": {"id": {"type": "int"}, "活动标题": {"type": "str"}}},
+                        "activity_task_target": {"primary_key": ["id"], "fields": {"id": {"type": "int"}, "任务逻辑": {"type": "str"}, "目标值": {"type": "int"}}},
+                        "activity_point_mission": {"primary_key": ["任务id"], "fields": {"任务id": {"type": "int"}, "奖励": {"type": "int"}, "积分": {"type": "int"}}},
+                        "reward": {"primary_key": ["id"], "fields": {"id": {"type": "int"}}},
+                    },
+                }
+            )
+            workbook = WorkbookIR(
+                source_id="plan",
+                source_type=SourceKind.LOCAL_EXCEL,
+                sheets=[
+                    SheetIR(
+                        name="BP规划",
+                        max_row=3,
+                        max_column=4,
+                        headers=["活动ID", "任务", "奖励", "积分"],
+                        header_row=1,
+                        sample_rows=[{"活动ID": 9001, "任务": "每日登录", "奖励": 30001, "积分": 10}],
+                    )
+                ],
+            )
+
+            seed_field_dictionary_from_schema(tmp, schema)
+            upsert_field_dictionary_entry(
+                tmp,
+                {
+                    "target_table": "activity_point_mission",
+                    "target_field": "奖励",
+                    "description": "BP 任务奖励组",
+                    "source_aliases": ["奖励", "奖励组"],
+                    "id_strategy": "new",
+                },
+            )
+            experience = build_experience_context(tmp, manifest, schema, [workbook], {})
+            self.assertEqual(experience["config_plan"]["activity_template_id"], "battle_pass")
+            self.assertTrue(experience["field_dictionary_matches"])
+            self.assertEqual(experience["config_plan"]["run_instruction"], manifest.run_instruction)
+
+            context = build_minimal_context(manifest, schema, [workbook], [], experience)
+            self.assertEqual(context["run_instruction"], manifest.run_instruction)
+            self.assertIn("field_dictionary_matches", context)
+
+    def test_structured_correction_is_reused_in_experience_context(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            manifest = Manifest.model_validate(
+                {
+                    "project": "correction-sample",
+                    "mode": "supervised_write",
+                    "schema_path": str(ROOT / "config" / "example.schema.json"),
+                    "run_instruction": "兑换商店活动，价格字段需要复核。",
+                    "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx"}],
+                    "target_tables": ["exchange"],
+                }
+            )
+            schema = SchemaBundle.model_validate(
+                {
+                    "version": 1,
+                    "tables": {
+                        "exchange": {
+                            "primary_key": ["id"],
+                            "fields": {"id": {"type": "int"}, "支付价格": {"type": "int"}},
+                        }
+                    },
+                }
+            )
+            patch_obj = Patch.model_validate(
+                {
+                    "patch_id": "patch_correction",
+                    "project": "correction-sample",
+                    "operations": [
+                        {
+                            "op": "insert",
+                            "target_table": "exchange",
+                            "rows": [{"id": 1, "支付价格": 100}],
+                            "reason": "unit",
+                            "confidence": 0.8,
+                        }
+                    ],
+                }
+            )
+            record = {"target_tables": ["exchange"], "validation_summary": {}}
+            review = local_case_review("价格字段不能直接取原价，要取规划里的现价。", record)
+            correction = build_structured_correction(manifest, patch_obj, "价格字段不能直接取原价，要取规划里的现价。", review, record)
+            save_structured_correction(tmp, correction)
+            workbook = WorkbookIR(
+                source_id="plan",
+                source_type=SourceKind.LOCAL_EXCEL,
+                sheets=[SheetIR(name="兑换规划", max_row=2, max_column=2, headers=["价格", "商品"], header_row=1, sample_rows=[{"价格": 100}])],
+            )
+            experience = build_experience_context(tmp, manifest, schema, [workbook], {})
+            self.assertTrue(experience["structured_corrections"])
+            self.assertIn("现价", experience["structured_corrections"][0]["correct_practice"])
 
     def test_experience_summary_ai_uses_review_json_shape(self) -> None:
         manifest = Manifest.model_validate(

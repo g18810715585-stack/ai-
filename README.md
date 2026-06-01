@@ -121,13 +121,17 @@ http://127.0.0.1:4321
 
 ## 经验教学
 
-经验教学分三步使用：
+经验教学现在集中在面板的“经验功能”弹窗里：
 
-1. 在面板“经验录入”里写一条自然语言规则，然后点“AI 整理经验”。工具会先把口语化经验整理成可编辑文本，不会立刻保存。
-2. 检查“整理结果”，必要时手动改几句，再点“保存整理结果”。经验会保存到本地 `.knowledge`，默认不进 Git。
-3. 需要回看或维护经验时，点“查看历史经验”，可以按录入时间查看、搜索、修改或删除经验。
-4. 填好飞书规划链接、配置表目录，并选择这次活动的主要目标配置表后，点“识别活动模板”。工具会输出“配表计划”和“待确认字段”。
-5. 确认计划后再点“分析关联关系”和“生成草案”。草案只会生成待审核 Patch，低置信字段会进“待确认字段”，不会硬写。
+1. 在“历史经验”页签里写一条自然语言规则，然后点“AI 整理经验”。工具会先把口语化经验整理成可编辑文本，并检查与历史经验是否冲突。
+2. 检查“整理结果”，必要时手动改几句，再点“保存经验”。经验会保存到本地 `.knowledge`，默认不进 Git。
+3. 需要回看或维护经验时，仍在同一个弹窗内搜索、修改或删除历史经验。
+4. “活动模板”页签可以维护兑换店、BP、积分任务、礼包、排行榜、掉落/收集等活动模板。
+5. “字段字典”页签可以按表/字段维护含义、规划列名别名、是否可写、ID 新建/复用策略和风险说明。
+6. 填好飞书规划链接、配置表目录，并选择这次活动的主要目标配置表后，点“识别活动模板”。工具会输出“配表计划”和“待确认字段”。
+7. 确认计划后再点“分析关联关系”和“生成草案”。草案只会生成待审核 Patch，低置信字段会进“待确认字段”，不会硬写。
+
+主面板的“本次配表指令”只作用于当前配表项目，比如活动 ID、参考旧活动、哪些 ID 新建、哪些字段复用；刷新项目后会恢复，但不会写入长期经验库。
 
 CLI 也可以录入经验和生成配表计划：
 
@@ -135,10 +139,12 @@ CLI 也可以录入经验和生成配表计划：
 node src/cli.mjs teach --manifest fixtures/sample.manifest.json --text "兑换商店活动一般要看 activity、active_shop、exchange、reward、goods、key"
 node src/cli.mjs experience-summary --manifest fixtures/sample.manifest.json --text "规划里商品名通常对应 goods.name，价格对应 exchange.price"
 node src/cli.mjs experience-list --manifest fixtures/sample.manifest.json
+node src/cli.mjs activity-template-list
+node src/cli.mjs field-dictionary-list
 node src/cli.mjs plan --manifest fixtures/sample.manifest.json
 ```
 
-知识库文件分开保存在 `.knowledge/rules.jsonl`、`.knowledge/activity_templates.jsonl`、`.knowledge/field_mappings.jsonl` 和 `.knowledge/case_examples.jsonl`。审核草案后运行 `learn` 会同时记录习惯和案例证据，后续相似活动会优先复用。
+知识库文件分开保存在 `.knowledge/rules.jsonl`、`.knowledge/activity_templates.jsonl`、`.knowledge/field_mappings.jsonl`、`.knowledge/field_dictionary.jsonl`、`.knowledge/case_examples.jsonl` 和 `.knowledge/structured_corrections.jsonl`。审核草案后运行 `learn` 会同时记录习惯和案例证据，后续相似活动会优先复用。
 
 ## 覆盖写表和案例复盘
 
@@ -147,7 +153,7 @@ node src/cli.mjs plan --manifest fixtures/sample.manifest.json
 1. `生成预览`：只生成预览 Excel、diff、校验报告、rollback patch 和本次配表记录，不覆盖原表。
 2. `覆盖原表`：确认后先备份原 Excel，再把 patch 写回原表，同时保留预览、diff、校验报告、rollback patch 和配表记录。
 
-每次执行后会进入 `配表记录` 页签，里面会列出这次改了哪些表、每个操作为什么这么改、置信度、风险、备份文件和写回文件。你本地打开 Excel 检查后，把这次所有问题写进 `本次问题修正`，点击 `确认并总结为案例`。工具会把这次配表流程、你的修正和 AI/本地总结保存到 `.knowledge/case_examples.jsonl`，下次生成配表计划和草案时会优先参考这些修正案例。
+每次执行后会进入 `配表记录` 页签，里面会列出这次改了哪些表、每个操作为什么这么改、置信度、风险、备份文件和写回文件。你本地打开 Excel 检查后，把这次所有问题写进 `本次问题修正`，点击 `确认并总结为案例`。工具会把这次配表流程、你的修正和 AI/本地总结保存到 `.knowledge/case_examples.jsonl`，同时沉淀结构化纠正规则到 `.knowledge/structured_corrections.jsonl`，下次生成配表计划和草案时会优先参考这些修正案例。
 
 CLI 对应命令：
 
@@ -166,6 +172,8 @@ relations  分析已选目标表的一跳/二跳关联关系
 teach    写入一条自然语言配表经验到本地知识库
 experience-summary  先用 AI/本地规则整理经验，生成可审核文本
 experience-list / experience-update / experience-delete  管理历史经验
+activity-template-list / activity-template-upsert / activity-template-delete  管理活动模板
+field-dictionary-list / field-dictionary-upsert / field-dictionary-delete / field-dictionary-seed  管理字段字典
 plan     识别活动模板并生成配表计划
 draft    生成配置 patch，可调用公司 BI，也可使用 --stub 本地草案
 apply    执行 patch，生成 preview、diff、validation、rollback

@@ -15,6 +15,7 @@ const projectStepStatus = document.querySelector("#projectStepStatus");
 const configDirInput = document.querySelector("#configDir");
 const planningFeishuUrlInput = document.querySelector("#planningFeishuUrl");
 const itemBaseFeishuUrlInput = document.querySelector("#itemBaseFeishuUrl");
+const runInstructionInput = document.querySelector("#runInstruction");
 const experienceText = document.querySelector("#experienceText");
 const experienceSummaryText = document.querySelector("#experienceSummaryText");
 const saveExperienceBtn = document.querySelector("#saveExperienceBtn");
@@ -36,6 +37,28 @@ const updateExperienceBtn = document.querySelector("#updateExperienceBtn");
 const deleteExperienceBtn = document.querySelector("#deleteExperienceBtn");
 const caseCorrectionText = document.querySelector("#caseCorrectionText");
 const saveCaseReviewBtn = document.querySelector("#saveCaseReviewBtn");
+const templateSearchInput = document.querySelector("#templateSearch");
+const templateList = document.querySelector("#templateList");
+const templateNameInput = document.querySelector("#templateName");
+const templateAliasesInput = document.querySelector("#templateAliases");
+const templateTargetTablesInput = document.querySelector("#templateTargetTables");
+const templateRelationChainInput = document.querySelector("#templateRelationChain");
+const templateIdStrategyInput = document.querySelector("#templateIdStrategy");
+const templateRiskNotesInput = document.querySelector("#templateRiskNotes");
+const templateEnabledInput = document.querySelector("#templateEnabled");
+const deleteTemplateBtn = document.querySelector("#deleteTemplateBtn");
+const dictionarySearchInput = document.querySelector("#dictionarySearch");
+const dictionaryList = document.querySelector("#dictionaryList");
+const dictionaryTableInput = document.querySelector("#dictionaryTable");
+const dictionaryFieldInput = document.querySelector("#dictionaryField");
+const dictionaryDescriptionInput = document.querySelector("#dictionaryDescription");
+const dictionaryAliasesInput = document.querySelector("#dictionaryAliases");
+const dictionaryIdStrategyInput = document.querySelector("#dictionaryIdStrategy");
+const dictionaryReferenceTableInput = document.querySelector("#dictionaryReferenceTable");
+const dictionaryRiskNoteInput = document.querySelector("#dictionaryRiskNote");
+const dictionaryWritableInput = document.querySelector("#dictionaryWritable");
+const dictionaryEnabledInput = document.querySelector("#dictionaryEnabled");
+const deleteDictionaryBtn = document.querySelector("#deleteDictionaryBtn");
 const tablePresetVersion = "meta-doc-excel-local-learning-v2";
 const tableTierRanks = { core: 0, high: 1, medium: 2, low: 3 };
 const tableTierLabels = { core: "核心", high: "高频", medium: "中频", low: "低频" };
@@ -84,6 +107,7 @@ const sampleManifest = {
   mode: "supervised_write",
   schema_path: "config/example.schema.json",
   run_root: ".runs",
+  run_instruction: "",
   planning_sources: [
     {
       id: "sample-planning",
@@ -134,6 +158,10 @@ let latestExperienceSummary = null;
 let latestDraftTablePreview = null;
 let savedExperiences = [];
 let selectedExperienceId = "";
+let activityTemplates = [];
+let selectedTemplateId = "";
+let fieldDictionary = [];
+let selectedDictionaryId = "";
 let lastApplyResult = null;
 let lastConfigurationRecord = null;
 
@@ -141,6 +169,7 @@ const rememberedFields = [
   ["configDir", configDirInput],
   ["planningFeishuUrl", planningFeishuUrlInput],
   ["itemBaseFeishuUrl", itemBaseFeishuUrlInput],
+  ["runInstruction", runInstructionInput],
   ["experienceText", experienceText],
   ["experienceSummaryText", experienceSummaryText]
 ];
@@ -206,6 +235,7 @@ function projectInputsSnapshot() {
     config_dir: configDirInput.value.trim(),
     planning_feishu_url: planningFeishuUrlInput.value.trim(),
     item_base_feishu_url: itemBaseFeishuUrlInput.value.trim(),
+    run_instruction: runInstructionInput.value.trim(),
     target_tables: selectedTargetTables,
     ai_provider: aiProvider,
     draft_mode: draftMode,
@@ -334,6 +364,7 @@ function restoreProject(project) {
   configDirInput.value = inputs.config_dir || configDirInput.value;
   planningFeishuUrlInput.value = inputs.planning_feishu_url || planningFeishuUrlInput.value;
   itemBaseFeishuUrlInput.value = inputs.item_base_feishu_url || itemBaseFeishuUrlInput.value;
+  runInstructionInput.value = inputs.run_instruction || runInstructionInput.value;
   if (inputs.experience_text) experienceText.value = inputs.experience_text;
   if (inputs.experience_summary_text) experienceSummaryText.value = inputs.experience_summary_text;
   if (inputs.case_correction_text) caseCorrectionText.value = inputs.case_correction_text;
@@ -489,7 +520,7 @@ function showProjectStep(step) {
 // Only the clicked workflow button stays enabled while a long backend action runs.
 function setActionBusy(button, label, busy) {
   if (!button) return;
-  const actionButtons = Array.from(document.querySelectorAll(".actions button, .experience-actions button, .history-actions button, .record-actions button"));
+  const actionButtons = Array.from(document.querySelectorAll(".actions button, .experience-actions button, .history-actions button, .record-actions button, .knowledge-editor button, .compact-tools button"));
   if (busy) {
     button.dataset.originalText = button.dataset.originalText || button.textContent;
     button.textContent = `正在${label}...`;
@@ -822,11 +853,30 @@ function openExperienceDialog() {
   experienceSearchInput.value = "";
   renderExperienceConflicts();
   loadSavedExperiences().catch((error) => setStatus(`加载历史经验失败：${error.message}`, "error"));
+  loadActivityTemplates().catch(() => {});
+  loadFieldDictionary().catch(() => {});
   if (!experienceText.value.trim()) experienceText.focus();
 }
 
 function closeExperienceDialog() {
   experienceDialog.hidden = true;
+}
+
+function showExperienceTab(name) {
+  for (const button of document.querySelectorAll("[data-experience-tab]")) {
+    button.classList.toggle("active", button.dataset.experienceTab === name);
+  }
+  const panelByName = {
+    history: "#experienceHistoryPanel",
+    templates: "#experienceTemplatesPanel",
+    dictionary: "#experienceDictionaryPanel"
+  };
+  const selector = panelByName[name];
+  for (const panel of document.querySelectorAll(".experience-tab-panel")) {
+    panel.classList.toggle("active", selector ? panel.matches(selector) : false);
+  }
+  if (name === "templates" && !activityTemplates.length) loadActivityTemplates().catch((error) => setStatus(`加载活动模板失败：${error.message}`, "error"));
+  if (name === "dictionary" && !fieldDictionary.length) loadFieldDictionary().catch((error) => setStatus(`加载字段字典失败：${error.message}`, "error"));
 }
 
 async function loadSavedExperiences() {
@@ -841,6 +891,213 @@ async function loadSavedExperiences() {
   } else {
     clearSelectedExperience();
   }
+}
+
+async function loadActivityTemplates() {
+  const payload = await buildPayload();
+  const data = await callApi("/api/activity-template-list", payload, { label: "加载活动模板" });
+  const summary = parseStdout(data);
+  activityTemplates = summary.templates || [];
+  selectedTemplateId = activityTemplates.some((item) => item.template_id === selectedTemplateId) ? selectedTemplateId : "";
+  renderActivityTemplateList();
+  if (selectedTemplateId) selectActivityTemplate(selectedTemplateId);
+  return activityTemplates;
+}
+
+function renderActivityTemplateList() {
+  const query = templateSearchInput.value.trim().toLowerCase();
+  const items = activityTemplates.filter((item) => {
+    if (!query) return true;
+    return `${item.name || ""} ${(item.aliases || []).join(" ")} ${(item.target_tables || []).join(" ")}`.toLowerCase().includes(query);
+  });
+  if (!items.length) {
+    templateList.innerHTML = '<div class="empty-state">还没有活动模板。</div>';
+    return;
+  }
+  templateList.innerHTML = items.map((item) => {
+    const active = item.template_id === selectedTemplateId ? " active" : "";
+    const enabled = item.enabled === false ? "已禁用" : "启用";
+    const tables = (item.target_tables || []).slice(0, 8).join(", ");
+    return `
+      <button class="knowledge-item${active}" type="button" data-template-id="${escapeHtml(item.template_id)}">
+        <strong>${escapeHtml(item.name || item.template_id)}</strong>
+        <small>${escapeHtml(enabled)} · ${escapeHtml(formatConfidence(item.confidence))} · ${escapeHtml(tables)}</small>
+      </button>
+    `;
+  }).join("");
+}
+
+function clearTemplateEditor() {
+  selectedTemplateId = "";
+  templateNameInput.value = "";
+  templateAliasesInput.value = "";
+  templateTargetTablesInput.value = "";
+  templateRelationChainInput.value = "";
+  templateIdStrategyInput.value = "";
+  templateRiskNotesInput.value = "";
+  templateEnabledInput.checked = true;
+  deleteTemplateBtn.disabled = true;
+  renderActivityTemplateList();
+}
+
+function selectActivityTemplate(templateId) {
+  const item = activityTemplates.find((value) => value.template_id === templateId);
+  if (!item) return clearTemplateEditor();
+  selectedTemplateId = templateId;
+  templateNameInput.value = item.name || "";
+  templateAliasesInput.value = (item.aliases || []).join("\n");
+  templateTargetTablesInput.value = (item.target_tables || []).join("\n");
+  templateRelationChainInput.value = (item.relation_chain || []).join("\n");
+  templateIdStrategyInput.value = item.id_strategy || "";
+  templateRiskNotesInput.value = (item.risk_notes || []).join("\n");
+  templateEnabledInput.checked = item.enabled !== false;
+  deleteTemplateBtn.disabled = false;
+  renderActivityTemplateList();
+}
+
+async function saveActivityTemplate() {
+  const name = templateNameInput.value.trim();
+  if (!name) throw new Error("请填写模板名称");
+  const payload = await buildPayload();
+  payload.template = {
+    template_id: selectedTemplateId || undefined,
+    name,
+    aliases: parseMultilineList(templateAliasesInput.value),
+    target_tables: parseMultilineList(templateTargetTablesInput.value),
+    relation_chain: parseMultilineList(templateRelationChainInput.value.replaceAll("->", "\n")),
+    id_strategy: templateIdStrategyInput.value.trim(),
+    risk_notes: parseMultilineList(templateRiskNotesInput.value),
+    enabled: templateEnabledInput.checked,
+    confidence: selectedTemplateId ? undefined : 0.72
+  };
+  const data = await callApi("/api/activity-template-upsert", payload, { label: "保存活动模板" });
+  const summary = parseStdout(data);
+  selectedTemplateId = summary.template?.template_id || selectedTemplateId;
+  await loadActivityTemplates();
+  setStatus("活动模板已保存", "ok");
+}
+
+async function deleteActivityTemplate() {
+  if (!selectedTemplateId) throw new Error("请先选择模板");
+  if (!window.confirm("确定删除或禁用这个活动模板吗？内置模板会被标记为禁用。")) return;
+  const payload = await buildPayload();
+  payload.template_id = selectedTemplateId;
+  await callApi("/api/activity-template-delete", payload, { label: "删除活动模板" });
+  clearTemplateEditor();
+  await loadActivityTemplates();
+}
+
+async function loadFieldDictionary() {
+  const payload = await buildPayload();
+  const data = await callApi("/api/field-dictionary-list", payload, { label: "加载字段字典" });
+  const summary = parseStdout(data);
+  fieldDictionary = summary.field_dictionary || [];
+  selectedDictionaryId = fieldDictionary.some((item) => item.dictionary_id === selectedDictionaryId) ? selectedDictionaryId : "";
+  renderFieldDictionaryList();
+  if (selectedDictionaryId) selectFieldDictionary(selectedDictionaryId);
+  return fieldDictionary;
+}
+
+function renderFieldDictionaryList() {
+  const query = dictionarySearchInput.value.trim().toLowerCase();
+  const items = fieldDictionary.filter((item) => {
+    if (!query) return true;
+    return `${item.target_table || ""} ${item.target_field || ""} ${item.description || ""} ${(item.source_aliases || []).join(" ")}`.toLowerCase().includes(query);
+  });
+  if (!items.length) {
+    dictionaryList.innerHTML = '<div class="empty-state">还没有字段字典。</div>';
+    return;
+  }
+  dictionaryList.innerHTML = items.slice(0, 300).map((item) => {
+    const active = item.dictionary_id === selectedDictionaryId ? " active" : "";
+    const writable = item.writable === false ? "只读" : "可写";
+    return `
+      <button class="knowledge-item${active}" type="button" data-dictionary-id="${escapeHtml(item.dictionary_id)}">
+        <strong>${escapeHtml(item.target_table || "?")}.${escapeHtml(item.target_field || "?")}</strong>
+        <small>${escapeHtml(writable)} · ${escapeHtml(item.id_strategy || "待确认")} · ${escapeHtml((item.source_aliases || []).slice(0, 4).join(" / "))}</small>
+        ${item.description ? `<small>${escapeHtml(item.description)}</small>` : ""}
+      </button>
+    `;
+  }).join("");
+}
+
+function clearDictionaryEditor() {
+  selectedDictionaryId = "";
+  dictionaryTableInput.value = "";
+  dictionaryFieldInput.value = "";
+  dictionaryDescriptionInput.value = "";
+  dictionaryAliasesInput.value = "";
+  dictionaryIdStrategyInput.value = "unknown";
+  dictionaryReferenceTableInput.value = "";
+  dictionaryRiskNoteInput.value = "";
+  dictionaryWritableInput.checked = true;
+  dictionaryEnabledInput.checked = true;
+  deleteDictionaryBtn.disabled = true;
+  renderFieldDictionaryList();
+}
+
+function selectFieldDictionary(dictionaryId) {
+  const item = fieldDictionary.find((value) => value.dictionary_id === dictionaryId);
+  if (!item) return clearDictionaryEditor();
+  selectedDictionaryId = dictionaryId;
+  dictionaryTableInput.value = item.target_table || "";
+  dictionaryFieldInput.value = item.target_field || "";
+  dictionaryDescriptionInput.value = item.description || "";
+  dictionaryAliasesInput.value = (item.source_aliases || []).join("\n");
+  dictionaryIdStrategyInput.value = item.id_strategy || "unknown";
+  dictionaryReferenceTableInput.value = item.reference_table || "";
+  dictionaryRiskNoteInput.value = item.risk_note || "";
+  dictionaryWritableInput.checked = item.writable !== false;
+  dictionaryEnabledInput.checked = item.enabled !== false;
+  deleteDictionaryBtn.disabled = false;
+  renderFieldDictionaryList();
+}
+
+async function saveFieldDictionary() {
+  const table = dictionaryTableInput.value.trim();
+  const field = dictionaryFieldInput.value.trim();
+  if (!table || !field) throw new Error("请填写目标表和目标字段");
+  const payload = await buildPayload();
+  payload.entry = {
+    dictionary_id: selectedDictionaryId || undefined,
+    target_table: table,
+    target_field: field,
+    description: dictionaryDescriptionInput.value.trim(),
+    source_aliases: parseMultilineList(dictionaryAliasesInput.value),
+    writable: dictionaryWritableInput.checked,
+    enabled: dictionaryEnabledInput.checked,
+    id_strategy: dictionaryIdStrategyInput.value,
+    reference_table: dictionaryReferenceTableInput.value.trim(),
+    risk_note: dictionaryRiskNoteInput.value.trim(),
+    confidence: selectedDictionaryId ? undefined : 0.72
+  };
+  const data = await callApi("/api/field-dictionary-upsert", payload, { label: "保存字段字典" });
+  const summary = parseStdout(data);
+  selectedDictionaryId = summary.entry?.dictionary_id || selectedDictionaryId;
+  await loadFieldDictionary();
+  setStatus("字段字典已保存", "ok");
+}
+
+async function deleteFieldDictionary() {
+  if (!selectedDictionaryId) throw new Error("请先选择字段字典");
+  if (!window.confirm("确定删除或禁用这个字段字典吗？内置字段会被标记为禁用。")) return;
+  const payload = await buildPayload();
+  payload.dictionary_id = selectedDictionaryId;
+  await callApi("/api/field-dictionary-delete", payload, { label: "删除字段字典" });
+  clearDictionaryEditor();
+  await loadFieldDictionary();
+}
+
+async function seedFieldDictionary() {
+  const payload = await buildPayload();
+  const data = await callApi("/api/field-dictionary-seed", payload, { label: "从 Schema 补齐字段字典" });
+  resultText.textContent = JSON.stringify(parseStdout(data), null, 2);
+  await loadFieldDictionary();
+  showTab("result");
+}
+
+function parseMultilineList(text) {
+  return String(text || "").split(/[\n,，;；]+/).map((item) => item.trim()).filter(Boolean);
 }
 
 function renderExperienceList() {
@@ -952,6 +1209,7 @@ async function buildPayload() {
   const itemBaseFeishuUrl = itemBaseFeishuUrlInput.value.trim();
   const configDir = configDirInput.value.trim();
   saveRememberedInputs();
+  manifest.run_instruction = runInstructionInput.value.trim();
 
   if (configDir) {
     manifest.config_roots = [{ path: configDir, recursive: true }];
@@ -1317,6 +1575,8 @@ function formatConfigPlan(plan) {
   lines.push("");
   lines.push(`活动模板：${plan.activity_type || "未识别"}`);
   lines.push(`置信度：${formatConfidence(plan.confidence)}`);
+  if (plan.run_instruction) lines.push(`本次指令：${plan.run_instruction}`);
+  if (plan.readiness) lines.push(`准备度：${plan.readiness.status || "待确认"} · ${plan.readiness.score || 0}/100`);
   if (plan.relation_chain?.length) {
     lines.push(`推荐链路：${plan.relation_chain.join(" -> ")}`);
   }
@@ -1324,9 +1584,12 @@ function formatConfigPlan(plan) {
   appendList(lines, "本次完整建议表", plan.all_recommended_tables);
   appendList(lines, "自动纳入生成范围", plan.auto_included_target_tables);
   appendRequiredFields(lines, plan.required_fields);
+  appendIdStrategy(lines, plan.id_strategy);
   appendMatchedMappings(lines, plan.matched_field_mappings);
+  appendFieldDictionary(lines, plan.field_dictionary_matches);
   appendMatchedRules(lines, plan.matched_rules);
   appendSimilarCases(lines, plan.similar_cases);
+  appendStructuredCorrections(lines, plan.structured_corrections);
   appendList(lines, "缺失信息", plan.missing_information);
   appendList(lines, "下一步", plan.next_steps || defaultPlanNextSteps(plan));
   if (plan.safety) {
@@ -1334,6 +1597,24 @@ function formatConfigPlan(plan) {
     lines.push(`- ${plan.safety}`);
   }
   return lines.join("\n").trim();
+}
+
+function appendIdStrategy(lines, strategy) {
+  if (!strategy) return;
+  const hasTemplate = Boolean(strategy.template_rule);
+  const fieldRules = Object.entries(strategy.field_rules || {});
+  const correctionRules = strategy.correction_rules || [];
+  if (!hasTemplate && !fieldRules.length && !correctionRules.length) return;
+  lines.push("ID 新建/复用策略");
+  if (hasTemplate) lines.push(`- 模板规则：${strategy.template_rule}`);
+  for (const [table, rules] of fieldRules.slice(0, 8)) {
+    const text = (rules || []).slice(0, 5).map((rule) => `${rule.field}:${rule.strategy}`).join(", ");
+    lines.push(`- ${table}: ${text}`);
+  }
+  for (const item of correctionRules.slice(0, 4)) {
+    lines.push(`- 历史纠正规则：${item.correct_practice || item.avoid_next_time || item.correction_id}`);
+  }
+  lines.push("");
 }
 
 function formatConfirmations(plan) {
@@ -1375,6 +1656,7 @@ function formatDraftDiagnostics(diagnostics) {
     lines.push("");
   }
   appendFieldMappings(lines, diagnostics.suggested_field_mappings);
+  appendFieldDictionary(lines, diagnostics.field_dictionary_matches);
   if (diagnostics.relationship_summary) {
     lines.push("关联关系摘要");
     lines.push(`- 关系数：${diagnostics.relationship_summary.relation_count || 0}`);
@@ -1423,6 +1705,18 @@ function appendMatchedMappings(lines, mappings) {
   lines.push("");
 }
 
+function appendFieldDictionary(lines, entries) {
+  if (!entries?.length) return;
+  lines.push("字段字典命中");
+  for (const entry of entries.slice(0, 12)) {
+    const aliases = entry.matched_aliases?.length ? entry.matched_aliases.join(" / ") : (entry.source_aliases || []).slice(0, 3).join(" / ");
+    const writable = entry.writable === false ? "不可直接写入" : "可写";
+    lines.push(`- ${aliases || "字段"} -> ${entry.target_table}.${entry.target_field}（${writable}，${entry.id_strategy || "待确认"}，${formatConfidence(entry.confidence)}）`);
+    if (entry.description) lines.push(`  ${entry.description}`);
+  }
+  lines.push("");
+}
+
 function appendMatchedRules(lines, rules) {
   if (!rules?.length) return;
   lines.push("命中的个人规则");
@@ -1437,6 +1731,15 @@ function appendSimilarCases(lines, cases) {
   lines.push("相似历史案例");
   for (const item of cases.slice(0, 6)) {
     lines.push(`- ${item.patch_id || item.case_id}: ${item.decision || "case"}，${item.operation_count || 0} 个操作`);
+  }
+  lines.push("");
+}
+
+function appendStructuredCorrections(lines, corrections) {
+  if (!corrections?.length) return;
+  lines.push("已复用纠正规则");
+  for (const item of corrections.slice(0, 6)) {
+    lines.push(`- ${item.correct_practice || item.error_pattern || item.correction_id}（${formatConfidence(item.match_score || item.confidence)}）`);
   }
   lines.push("");
 }
@@ -1626,12 +1929,34 @@ targetDialog.addEventListener("click", (event) => {
 });
 document.querySelector("#openExperienceDialog").addEventListener("click", openExperienceDialog);
 document.querySelector("#closeExperienceDialog").addEventListener("click", closeExperienceDialog);
+for (const button of document.querySelectorAll("[data-experience-tab]")) {
+  button.addEventListener("click", () => showExperienceTab(button.dataset.experienceTab));
+}
 document.querySelector("#refreshExperienceList").addEventListener("click", (event) => runAction(event, loadSavedExperiences));
 experienceSearchInput.addEventListener("input", renderExperienceList);
 experienceList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-experience-id]");
   if (button) selectExperience(button.dataset.experienceId);
 });
+templateSearchInput.addEventListener("input", renderActivityTemplateList);
+templateList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-template-id]");
+  if (button) selectActivityTemplate(button.dataset.templateId);
+});
+document.querySelector("#refreshTemplateList").addEventListener("click", (event) => runAction(event, loadActivityTemplates));
+document.querySelector("#newTemplateBtn").addEventListener("click", clearTemplateEditor);
+document.querySelector("#saveTemplateBtn").addEventListener("click", (event) => runAction(event, saveActivityTemplate));
+deleteTemplateBtn.addEventListener("click", (event) => runAction(event, deleteActivityTemplate));
+dictionarySearchInput.addEventListener("input", renderFieldDictionaryList);
+dictionaryList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-dictionary-id]");
+  if (button) selectFieldDictionary(button.dataset.dictionaryId);
+});
+document.querySelector("#refreshDictionaryList").addEventListener("click", (event) => runAction(event, loadFieldDictionary));
+document.querySelector("#newDictionaryBtn").addEventListener("click", clearDictionaryEditor);
+document.querySelector("#saveDictionaryBtn").addEventListener("click", (event) => runAction(event, saveFieldDictionary));
+deleteDictionaryBtn.addEventListener("click", (event) => runAction(event, deleteFieldDictionary));
+document.querySelector("#seedDictionaryBtn").addEventListener("click", (event) => runAction(event, seedFieldDictionary));
 experienceEditText.addEventListener("input", () => {
   updateExperienceBtn.disabled = !selectedExperienceId || !experienceEditText.value.trim();
 });
@@ -1815,10 +2140,12 @@ saveCaseReviewBtn.addEventListener("click", (event) => runAction(event, async (l
   payload.no_ai = draftMode !== "real";
   const data = await callApi("/api/case-review", payload, { label });
   const caseReview = data.artifact?.caseReview || parseStdout(data);
+  const structuredCorrection = data.artifact?.structuredCorrection || caseReview.structured_correction || null;
   recordText.textContent = JSON.stringify(
     {
       configuration_record: lastConfigurationRecord,
-      case_review: caseReview
+      case_review: caseReview,
+      structured_correction: structuredCorrection
     },
     null,
     2
