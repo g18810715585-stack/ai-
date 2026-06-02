@@ -385,6 +385,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(result["write_mode"], "overwrite")
             self.assertTrue(result["backups"])
             self.assertTrue(result["written_files"])
+            result["timing"] = {"total_seconds": 1.23, "apply_seconds": 0.9, "write_mode": "overwrite", "status": "success"}
             workbook = load_workbook(config, data_only=True)
             rows = list(workbook["shop_pack_config"].iter_rows(values_only=True))
             self.assertEqual(rows[2][0], 1002)
@@ -393,6 +394,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(record["write_mode"], "overwrite")
             self.assertEqual(record["operation_count"], 2)
             self.assertIn("shop_pack_config", record["target_tables"])
+            self.assertEqual(record["timing"]["total_seconds"], 1.23)
             review = local_case_review("价格字段要复核，礼包名称不能直接覆盖旧翻译。", record)
             case = save_case_review(tmp, manifest, patch, result, "价格字段要复核，礼包名称不能直接覆盖旧翻译。", review)
             self.assertEqual(case["decision"], "corrected")

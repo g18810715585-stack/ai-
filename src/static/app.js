@@ -493,6 +493,7 @@ function showProjectStep(step) {
     if (record.data?.patch) patchText.value = JSON.stringify(record.data.patch, null, 2);
     if (record.data?.draftDiagnostics) diagnosticsText.textContent = formatDraftDiagnostics(record.data.draftDiagnostics);
     if (record.data?.draftTablePreview) renderDraftTablePreview(record.data.draftTablePreview);
+    latestOptimization = compactOptimization({ artifact: { draftTiming: record.data?.draftTiming } }) || latestOptimization;
     showTab(record.data?.draftTablePreview?.table_count ? "dataPreview" : record.data?.patch ? "patch" : "diagnostics");
     return;
   }
@@ -1359,6 +1360,7 @@ function compactConfigurationRecord(data) {
       operation_count: record?.operation_count || result.operation_results?.length || 0,
       target_tables: record?.target_tables || [],
       validation_summary: record?.validation_summary || null,
+      timing: result.timing || record?.timing || artifact.applyTiming || null,
       previews: result.previews || record?.previews || {},
       backups: result.backups || record?.backups || {},
       written_files: result.written_files || record?.written_files || {}
@@ -1429,8 +1431,9 @@ function compactItemResolution(data) {
 function compactOptimization(data) {
   const budget = data.artifact?.contextBudget || null;
   const timing = data.artifact?.draftTiming || null;
+  const applyTiming = data.artifact?.applyTiming || data.artifact?.result?.timing || data.artifact?.runError?.timing || null;
   const value = data.artifact?.valueCandidates || data.artifact?.planningItemResolution || null;
-  if (!budget && !timing && !value) return null;
+  if (!budget && !timing && !applyTiming && !value) return null;
   return {
     context_budget: budget ? {
       original_kb: budget.original?.kb,
@@ -1443,6 +1446,7 @@ function compactOptimization(data) {
       planning_evidence_rows_sent_to_ai: budget.rows?.planning_evidence_rows_sent_to_ai
     } : null,
     draft_timing: timing || null,
+    apply_timing: applyTiming || null,
     item_resolution_summary: value?.summary || null
   };
 }
@@ -2150,9 +2154,14 @@ async function applyCurrentPatch(writeMode, label) {
   payload.write_mode = writeMode;
   const data = await callApi("/api/apply", payload, { label });
   renderConfigurationRecord(data);
+  const applyOptimization = compactOptimization(data);
   resultText.textContent = JSON.stringify(
     {
       apply: data.artifact || parseStdout(data),
+      generation_timing: {
+        draft: latestOptimization?.draft_timing || null,
+        apply: applyOptimization?.apply_timing || null
+      },
       context_optimization: latestOptimization
     },
     null,

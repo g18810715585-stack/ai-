@@ -237,9 +237,11 @@ function stepPaths(parsed) {
       config_plan: parsed.config_plan,
       draft_table_preview: parsed.draft_table_preview,
       draft_diagnostics: parsed.draft_diagnostics,
+      draft_timing: parsed.draft_timing,
       patch: parsed.patch,
       result: parsed.result,
       configuration_record: parsed.configuration_record,
+      apply_timing: parsed.apply_timing,
       run_error: parsed.run_error,
       case_review: parsed.case_review,
       structured_correction: parsed.structured_correction
@@ -273,6 +275,7 @@ function stepSummary(step, artifact = {}, parsed = {}) {
       operation_count: artifact.patch?.operations?.length || 0,
       status: artifact.draftDiagnostics?.status || "draft",
       table_preview_count: artifact.draftTablePreview?.table_count || 0,
+      timing: artifact.draftTiming || null,
       target_tables: [...new Set((artifact.patch?.operations || []).map((operation) => operation.target_table))]
     };
   }
@@ -285,6 +288,7 @@ function stepSummary(step, artifact = {}, parsed = {}) {
       operation_count: result.operation_results?.length || 0,
       preview_count: Object.keys(result.previews || {}).length,
       written_count: Object.keys(result.written_files || {}).length,
+      timing: artifact.applyTiming || result.timing || artifact.runError?.timing || null,
       validation_summary: artifact.configurationRecord?.validation_summary || null
     };
   }
@@ -328,6 +332,7 @@ function stepData(step, artifact = {}, parsed = {}) {
       configPlan: artifact.configPlan || null,
       draftDiagnostics: artifact.draftDiagnostics || null,
       draftTablePreview: artifact.draftTablePreview || null,
+      draftTiming: artifact.draftTiming || null,
       relationshipMap: compactRelationshipMap(artifact.relationshipMap || {})
     };
   }
@@ -338,7 +343,8 @@ function stepData(step, artifact = {}, parsed = {}) {
       diff: compactDiff(artifact.diff || {}),
       validation: artifact.validation || null,
       rollback: artifact.rollback || null,
-      runError: artifact.runError || null
+      runError: artifact.runError || null,
+      applyTiming: artifact.applyTiming || artifact.result?.timing || artifact.runError?.timing || null
     };
   }
   if (step === "caseReview") {
@@ -375,7 +381,8 @@ function compactApplyResult(result) {
     previews: result.previews || {},
     backups: result.backups || {},
     written_files: result.written_files || {},
-    validation: result.validation || {}
+    validation: result.validation || {},
+    timing: result.timing || null
   };
 }
 

@@ -69,7 +69,8 @@ test("workflow run records latest step data and keeps history", () => {
     },
     artifact: {
       patch: { patch_id: "p1", project: "礼包活动", operations: [] },
-      draftDiagnostics: { status: "empty" }
+      draftDiagnostics: { status: "empty" },
+      draftTiming: { total_seconds: 12.34, ai_wait_seconds: 8.5 }
     },
     payload: {
       stub: true,
@@ -83,8 +84,10 @@ test("workflow run records latest step data and keeps history", () => {
   });
 
   assert.equal(recorded.steps.draft.summary.operation_count, 0);
+  assert.equal(recorded.steps.draft.summary.timing.total_seconds, 12.34);
   assert.equal(recorded.steps.draft.paths.patch, patchPath);
   assert.equal(recorded.steps.draft.data.patch.patch_id, "p1");
+  assert.equal(recorded.steps.draft.data.draftTiming.ai_wait_seconds, 8.5);
   assert.equal(recorded.inputs.config_dir, "C:\\TopHero\\Meta");
   assert.equal(recorded.inputs.run_instruction, "本次礼包奖励组新建");
   assert.deepEqual(recorded.inputs.target_tables, ["activity"]);
@@ -98,6 +101,7 @@ test("failed apply run keeps error details in the project record", () => {
   const errorPath = path.join(runDir, "run-error.json");
   fs.mkdirSync(runDir, { recursive: true });
   const runError = { error_type: "PermissionError", error: "原表暂时无法写入" };
+  runError.timing = { total_seconds: 3.21, status: "error" };
   fs.writeFileSync(errorPath, JSON.stringify(runError), "utf8");
 
   const recorded = recordWorkflowRun(dir, project.project_id, "applyOverwrite", {
@@ -111,7 +115,9 @@ test("failed apply run keeps error details in the project record", () => {
 
   assert.equal(recorded.steps.applyOverwrite.status, 1);
   assert.equal(recorded.steps.applyOverwrite.summary.error_type, "PermissionError");
+  assert.equal(recorded.steps.applyOverwrite.summary.timing.total_seconds, 3.21);
   assert.equal(recorded.steps.applyOverwrite.summary.error, "原表暂时无法写入");
   assert.equal(recorded.steps.applyOverwrite.data.runError.error_type, "PermissionError");
+  assert.equal(recorded.steps.applyOverwrite.data.applyTiming.status, "error");
   assert.equal(recorded.steps.applyOverwrite.paths.run_error, errorPath);
 });

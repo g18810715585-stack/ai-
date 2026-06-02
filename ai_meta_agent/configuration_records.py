@@ -61,6 +61,7 @@ def build_configuration_record(manifest: Manifest, patch: Patch, apply_result: d
         "backups": apply_result.get("backups", {}),
         "written_files": apply_result.get("written_files", {}),
         "validation_summary": _validation_summary(apply_result.get("validation", {})),
+        "timing": apply_result.get("timing") or {},
     }
     return record
 

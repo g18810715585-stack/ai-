@@ -5,6 +5,7 @@ import json
 import sys
 import time
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -144,6 +145,10 @@ def _json_arg(value: str) -> dict[str, Any]:
     if path.exists():
         return read_json(path)
     return json.loads(value)
+
+
+def _utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _auto_expand_generation_tables(manifest: Manifest, full_schema: Any, config_plan: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -524,6 +529,7 @@ def cmd_draft(args: argparse.Namespace) -> int:
     if not manifest_path.is_absolute():
         manifest_path = base_dir / manifest_path
     draft_started = time.perf_counter()
+    draft_started_at = _utc_iso()
     manifest, schema, run_dir, context = analyze_manifest(manifest_path, base_dir, "draft")
     analysis_finished = time.perf_counter()
     ai_context = context.get("_ai_context", context)
@@ -576,9 +582,13 @@ def cmd_draft(args: argparse.Namespace) -> int:
     )
     write_json(run_dir / "draft-diagnostics.json", diagnostics)
     timing = {
+        "started_at": draft_started_at,
+        "finished_at": _utc_iso(),
+        "total_seconds": round(time.perf_counter() - draft_started, 3),
         "local_analysis_seconds": round(analysis_finished - draft_started, 3),
         "ai_wait_seconds": round(ai_finished - ai_started, 3),
         "postprocess_seconds": round(time.perf_counter() - ai_finished, 3),
+        "operation_count": len(patch.operations),
         "mode": "stub" if args.stub else "real_ai",
     }
     write_json(run_dir / "draft-timing.json", timing)
@@ -685,19 +695,45 @@ def cmd_apply(args: argparse.Namespace) -> int:
         patch_path = base_dir / patch_path
     manifest = _load_manifest(manifest_path)
     run_dir = make_run_dir(_run_root(base_dir, manifest), "apply")
+    apply_started = time.perf_counter()
+    apply_started_at = _utc_iso()
     try:
         schema = load_schema(_schema_path(base_dir, manifest))
         schema = _targeted_schema(schema, manifest)
         manifest, _ = discover_config_tables(manifest, schema, base_dir)
         patch = Patch.model_validate(read_json(patch_path))
+        prepared_at = time.perf_counter()
         result = apply_patch(manifest, schema, patch, base_dir, run_dir, write_mode=args.write_mode)
+        applied_at = time.perf_counter()
+        record_started = time.perf_counter()
+        timing = {
+            "started_at": apply_started_at,
+            "finished_at": _utc_iso(),
+            "total_seconds": 0,
+            "prepare_seconds": round(prepared_at - apply_started, 3),
+            "apply_seconds": round(applied_at - prepared_at, 3),
+            "record_seconds": 0,
+            "write_mode": args.write_mode,
+            "operation_count": len(patch.operations),
+            "preview_count": len(result.get("previews") or {}),
+            "written_count": len(result.get("written_files") or {}),
+            "status": "success",
+        }
+        result["timing"] = timing
         record = build_configuration_record(manifest, patch, result, run_dir)
+        recorded_at = time.perf_counter()
+        timing["finished_at"] = _utc_iso()
+        timing["total_seconds"] = round(recorded_at - apply_started, 3)
+        timing["record_seconds"] = round(recorded_at - record_started, 3)
+        record["timing"] = timing
+        result["timing"] = timing
         result["configuration_record"] = record
         result["configuration_record_paths"] = persist_configuration_record(base_dir, record, run_dir)
         write_json(run_dir / "apply-result.json", result)
         write_json(run_dir / "diff.json", result["diff"])
         write_json(run_dir / "validation.json", result["validation"])
         write_json(run_dir / "rollback-patch.json", result["rollback_patch"])
+        write_json(run_dir / "apply-timing.json", timing)
         write_text(run_dir / "apply-result.md", _apply_markdown(result))
         print(
             json.dumps(
@@ -705,6 +741,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     "run_dir": str(run_dir),
                     "result": str(run_dir / "apply-result.json"),
                     "configuration_record": str(run_dir / "configuration-record.json"),
+                    "apply_timing": str(run_dir / "apply-timing.json"),
                     "write_mode": args.write_mode,
                 },
                 ensure_ascii=False,
@@ -713,19 +750,31 @@ def cmd_apply(args: argparse.Namespace) -> int:
         )
         return 0
     except Exception as exc:  # noqa: BLE001 - surfaced to the local panel with run artifacts.
+        timing = {
+            "started_at": apply_started_at,
+            "finished_at": _utc_iso(),
+            "total_seconds": round(time.perf_counter() - apply_started, 3),
+            "write_mode": args.write_mode,
+            "status": "error",
+            "error_type": exc.__class__.__name__,
+            "error": str(exc),
+        }
         error_payload = {
             "command": "apply",
             "write_mode": args.write_mode,
             "error_type": exc.__class__.__name__,
             "error": str(exc),
             "traceback": traceback.format_exc(),
+            "timing": timing,
         }
         write_json(run_dir / "run-error.json", error_payload)
+        write_json(run_dir / "apply-timing.json", timing)
         print(
             json.dumps(
                 {
                     "run_dir": str(run_dir),
                     "run_error": str(run_dir / "run-error.json"),
+                    "apply_timing": str(run_dir / "apply-timing.json"),
                     "write_mode": args.write_mode,
                     "error": str(exc),
                 },
