@@ -17,6 +17,7 @@ from .models import Manifest, Patch, PatchOperation, SchemaBundle, SourceRef
 
 DEFAULT_AI_TIMEOUT_SECONDS = 240
 DEFAULT_AI_MAX_OUTPUT_TOKENS = 7000
+DEFAULT_DEEPSEEK_MAX_OUTPUT_TOKENS = 14000
 
 AI_PROVIDERS = {
     "chatgpt": {
@@ -28,6 +29,7 @@ AI_PROVIDERS = {
         "default_model": "gpt-5.5",
         "max_tokens_env": "CHATGPT_MAX_OUTPUT_TOKENS",
         "reasoning_effort_env": "CHATGPT_REASONING_EFFORT",
+        "default_max_output_tokens": DEFAULT_AI_MAX_OUTPUT_TOKENS,
         "extra_body": {},
         "temperature": 0.1,
     },
@@ -40,6 +42,7 @@ AI_PROVIDERS = {
         "default_model": "gemini-3.1-pro-preview",
         "max_tokens_env": "GEMINI_MAX_OUTPUT_TOKENS",
         "reasoning_effort_env": "GEMINI_REASONING_EFFORT",
+        "default_max_output_tokens": DEFAULT_AI_MAX_OUTPUT_TOKENS,
         "extra_body": {},
         "temperature": 0.1,
     },
@@ -52,6 +55,7 @@ AI_PROVIDERS = {
         "default_model": "claude-opus-4-8",
         "max_tokens_env": "CLAUDE_MAX_OUTPUT_TOKENS",
         "reasoning_effort_env": "CLAUDE_REASONING_EFFORT",
+        "default_max_output_tokens": DEFAULT_AI_MAX_OUTPUT_TOKENS,
         "extra_body": {},
         "temperature": None,
     },
@@ -64,6 +68,7 @@ AI_PROVIDERS = {
         "default_model": "deepseek-v4-pro",
         "max_tokens_env": "DEEPSEEK_MAX_OUTPUT_TOKENS",
         "reasoning_effort_env": "DEEPSEEK_REASONING_EFFORT",
+        "default_max_output_tokens": DEFAULT_DEEPSEEK_MAX_OUTPUT_TOKENS,
         "extra_body": {},
         "temperature": 0.1,
     },
@@ -233,7 +238,11 @@ def _int_env(*names: str | None, default: int) -> int:
 
 
 def _apply_ai_generation_budget(body: dict[str, Any], runtime: dict[str, Any]) -> dict[str, Any]:
-    max_tokens = _int_env(runtime.get("max_tokens_env"), "AI_MAX_OUTPUT_TOKENS", default=DEFAULT_AI_MAX_OUTPUT_TOKENS)
+    max_tokens = _int_env(
+        runtime.get("max_tokens_env"),
+        "AI_MAX_OUTPUT_TOKENS",
+        default=int(runtime.get("default_max_output_tokens") or DEFAULT_AI_MAX_OUTPUT_TOKENS),
+    )
     if max_tokens > 0 and "max_tokens" not in body:
         body["max_tokens"] = max_tokens
     reasoning_effort = _first_env(runtime.get("reasoning_effort_env"), "AI_REASONING_EFFORT")
@@ -334,7 +343,17 @@ def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: 
                 "response": payload,
             },
         )
-    content = payload["choices"][0]["message"]["content"]
+    choice = payload["choices"][0]
+    message = choice.get("message") or {}
+    content = message.get("content") or ""
+    if not content.strip() and message.get("reasoning_content"):
+        finish_reason = choice.get("finish_reason") or "unknown"
+        used_tokens = ((payload.get("usage") or {}).get("completion_tokens") or "unknown")
+        raise RuntimeError(
+            f"{runtime['label']} 只返回了推理内容，没有返回 patch JSON。"
+            f"finish_reason={finish_reason}，completion_tokens={used_tokens}。"
+            f"请调高 {runtime.get('max_tokens_env') or 'AI_MAX_OUTPUT_TOKENS'}，或切换到更少推理的模型后重试。"
+        )
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError as exc:

@@ -1895,10 +1895,45 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(generated.patch_id, "patch_deepseek")
         self.assertEqual(captured["url"], "https://baseai.rivergame.net/v1/chat/completions")
         self.assertEqual(captured["body"]["model"], "deepseek-v4-pro")
-        self.assertEqual(captured["body"]["max_tokens"], 7000)
+        self.assertEqual(captured["body"]["max_tokens"], 14000)
         self.assertNotIn("thinking", captured["body"])
         self.assertEqual(captured["body"]["response_format"], {"type": "json_object"})
         self.assertEqual(captured["authorization"], "Bearer unit-key")
+
+    def test_deepseek_reasoning_only_response_has_clear_error(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "deepseek-reasoning-only",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx", "role": "planning"}],
+                "ai": {"provider": "deepseek_v4_pro"},
+            }
+        )
+        response_payload = {
+            "choices": [
+                {
+                    "message": {"content": "", "reasoning_content": "thinking..."},
+                    "finish_reason": "length",
+                }
+            ],
+            "usage": {"completion_tokens": 7000},
+        }
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(response_payload).encode("utf-8")
+
+        with patch.dict(os.environ, {"BASEAI_API_KEY": "unit-key"}, clear=True):
+            with patch("urllib.request.urlopen", return_value=FakeResponse()):
+                with self.assertRaisesRegex(RuntimeError, "只返回了推理内容"):
+                    call_baseai(manifest, {"project": "deepseek-reasoning-only"})
 
     def test_ai_generation_budget_can_be_overridden_per_provider(self) -> None:
         manifest = Manifest.model_validate(

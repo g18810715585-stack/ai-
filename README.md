@@ -66,10 +66,11 @@ GEMINI_MODEL=gemini-3.1-pro-preview
 CLAUDE_MODEL=claude-opus-4-8
 DEEPSEEK_MODEL=deepseek-v4-pro
 AI_MAX_OUTPUT_TOKENS=7000
+DEEPSEEK_MAX_OUTPUT_TOKENS=14000
 ```
 
 实际 `.env` 里需要在 `BASEAI_API_KEY` 后面填入公司 BI Key；四个服务商都会使用这个 Key。
-`AI_MAX_OUTPUT_TOKENS` 用来限制草案 JSON 输出长度，默认 7000，能减少模型长时间推理和超时；如果一次活动特别大，可以临时调高，或设为 `0` 关闭限制。
+`AI_MAX_OUTPUT_TOKENS` 用来限制草案 JSON 输出长度，默认 7000，能减少模型长时间推理和超时；DeepSeek 会优先使用 `DEEPSEEK_MAX_OUTPUT_TOKENS`，默认 14000，因为它经常先消耗一段推理 token 再输出 JSON。如果一次活动特别大，可以临时调高，或设为 `0` 关闭限制。
 
 面板里“草案生成方式”保持“本地草案”时不会调用模型；切到“真实 AI”后，可在旁边选择 `ChatGPT`、`Gemini`、`Claude`、`DeepSeek`。命令行模式通过 manifest 的 `ai.provider` 控制，支持 `chatgpt`、`gemini`、`claude`、`deepseek_v4_pro`；旧的 `baseai` 会兼容为 `chatgpt`。
 
