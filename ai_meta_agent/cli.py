@@ -57,7 +57,7 @@ from .id_allocator import fill_incremental_placeholders
 from .io_utils import make_run_dir, read_json, write_json, write_text
 from .item_resolution import compact_item_resolution, resolve_planning_items
 from .models import Manifest, Patch
-from .patch_sanitizer import sanitize_patch
+from .patch_sanitizer import apply_reward_top_level_defaults, sanitize_patch
 from .patch_engine import apply_patch
 from .relation_scanner import compact_relationship_context, scan_relationships
 from .schema import load_schema
@@ -556,10 +556,12 @@ def cmd_draft(args: argparse.Namespace) -> int:
     else:
         patch = call_baseai(manifest, ai_context, run_dir / "ai-response.json")
         ai_finished = time.perf_counter()
+    reward_defaults = apply_reward_top_level_defaults(patch, schema, context)
     sanitizer_result = sanitize_patch(patch)
     id_allocation = fill_incremental_placeholders(patch, context)
     Patch.model_validate(patch.model_dump())
     write_json(run_dir / "patch.json", patch.model_dump(mode="json", exclude_none=True))
+    write_json(run_dir / "reward-defaults.json", reward_defaults)
     write_json(run_dir / "patch-sanitizer.json", sanitizer_result)
     write_json(run_dir / "id-allocation.json", id_allocation)
     write_json(run_dir / "candidate-habits.json", _candidate_habits_from_patch(patch))
@@ -604,6 +606,7 @@ def cmd_draft(args: argparse.Namespace) -> int:
                 "draft_table_preview": str(run_dir / "draft-table-preview.json"),
                 "draft_diagnostics": str(run_dir / "draft-diagnostics.json"),
                 "patch_sanitizer": str(run_dir / "patch-sanitizer.json"),
+                "reward_defaults": str(run_dir / "reward-defaults.json"),
                 "context_budget": str(run_dir / "context-budget.json"),
                 "draft_timing": str(run_dir / "draft-timing.json"),
                 "structured_planning": str(run_dir / "planning-structured.json"),

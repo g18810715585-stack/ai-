@@ -42,7 +42,7 @@ from ai_meta_agent.id_allocator import fill_active_shop_incremental_ids, fill_in
 from ai_meta_agent.io_utils import read_json, write_json
 from ai_meta_agent.item_resolution import resolve_planning_items
 from ai_meta_agent.models import Manifest, Patch, PlanningSource, SchemaBundle, SheetIR, SourceKind, WorkbookIR
-from ai_meta_agent.patch_sanitizer import sanitize_patch
+from ai_meta_agent.patch_sanitizer import apply_reward_top_level_defaults, sanitize_patch
 from ai_meta_agent.patch_engine import apply_patch
 from ai_meta_agent.planning_parser import build_structured_planning
 from ai_meta_agent.relation_scanner import scan_relationships, split_reference_values
@@ -1866,8 +1866,54 @@ class WorkflowTests(unittest.TestCase):
         compact = enforce_fast_context_budget(context)
         fields = compact["schema"]["tables"]["reward"]["field_names"]
 
+        self.assertIn("type", fields)
+        self.assertIn("num", fields)
         self.assertIn("num_1", fields)
         self.assertIn("weight_1", fields)
+
+    def test_exchange_shop_reward_defaults_fill_top_level_num_not_slot_num(self) -> None:
+        schema = SchemaBundle.model_validate(
+            {
+                "version": 1,
+                "tables": {
+                    "reward": {
+                        "primary_key": ["id"],
+                        "fields": {
+                            "id": {"type": "int"},
+                            "type": {"type": "int"},
+                            "num": {"type": "int"},
+                            "type_1": {"type": "int"},
+                            "reward_1": {"type": "int"},
+                            "num_1": {"type": "int"},
+                        },
+                    }
+                },
+            }
+        )
+        patch_obj = Patch.model_validate(
+            {
+                "patch_id": "reward-defaults",
+                "project": "exchange-shop",
+                "operations": [
+                    {
+                        "op": "insert",
+                        "target_table": "reward",
+                        "rows": [{"id": 605286006, "type_1": 7, "reward_1": 323}],
+                        "reason": "AI omitted top-level reward fields",
+                        "confidence": 0.8,
+                    }
+                ],
+            }
+        )
+        context = {"target_tables": ["activity", "active_shop", "reward"]}
+
+        result = apply_reward_top_level_defaults(patch_obj, schema, context)
+        row = patch_obj.operations[0].rows[0]
+
+        self.assertTrue(result["applied"])
+        self.assertEqual(row["type"], 2)
+        self.assertEqual(row["num"], 1)
+        self.assertNotIn("num_1", row)
 
     def test_compact_profiles_keep_id_allocation_evidence(self) -> None:
         profiles = {

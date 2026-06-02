@@ -597,15 +597,17 @@ def _priority_fields(fields: list[str], table: dict[str, Any], limit: int) -> li
 def _field_name_priority(field: str) -> int:
     text = str(field)
     score = 0
-    for keyword in PROFILE_PRIORITY_KEYWORDS:
-        if keyword in text or keyword in text.lower():
-            score += 10
-    if any(value in text.lower() for value in ("id", "type", "group", "reward", "goods", "cost", "price", "order", "time", "form", "list")):
-        score += 20
     lowered = text.lower()
+    if lowered in {"type", "num"}:
+        score += 120
+    for keyword in PROFILE_PRIORITY_KEYWORDS:
+        if keyword in text or keyword in lowered:
+            score += 10
+    if any(value in lowered for value in ("id", "type", "group", "reward", "goods", "cost", "price", "order", "time", "form", "list")):
+        score += 20
     if lowered.startswith(("type_", "reward_", "num_", "weight_")):
         score += 45
-    if any(value in text.lower() for value in ("num", "count", "weight")) or any(value in text for value in ("数量", "权重", "道具数量")):
+    if any(value in lowered for value in ("num", "count", "weight")) or any(value in text for value in ("数量", "权重", "道具数量")):
         score += 35
     return score
 
