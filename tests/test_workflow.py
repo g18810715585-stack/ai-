@@ -1865,11 +1865,14 @@ class WorkflowTests(unittest.TestCase):
 
         compact = enforce_fast_context_budget(context)
         fields = compact["schema"]["tables"]["reward"]["field_names"]
+        required = compact["schema"]["tables"]["reward"].get("required_fields", [])
 
         self.assertIn("type", fields)
         self.assertIn("num", fields)
         self.assertIn("num_1", fields)
         self.assertIn("weight_1", fields)
+        self.assertNotIn("is_removal", required)
+        self.assertNotIn("hero_limit", required)
 
     def test_exchange_shop_reward_defaults_fill_top_level_num_not_slot_num(self) -> None:
         schema = SchemaBundle.model_validate(
@@ -1914,6 +1917,42 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(row["type"], 2)
         self.assertEqual(row["num"], 1)
         self.assertNotIn("num_1", row)
+
+    def test_reward_optional_zero_fields_are_removed_from_insert_rows(self) -> None:
+        patch_obj = Patch.model_validate(
+            {
+                "patch_id": "reward-optional-zero",
+                "project": "exchange-shop",
+                "operations": [
+                    {
+                        "op": "insert",
+                        "target_table": "reward",
+                        "rows": [
+                            {
+                                "id": 605286006,
+                                "is_removal": 0,
+                                "hero_limit": "0",
+                                "type": 2,
+                                "num": 1,
+                                "type_1": 7,
+                                "reward_1": 323,
+                            }
+                        ],
+                        "reason": "AI filled optional zero defaults",
+                        "confidence": 0.8,
+                    }
+                ],
+            }
+        )
+
+        result = sanitize_patch(patch_obj)
+        row = patch_obj.operations[0].rows[0]
+
+        self.assertEqual(result["reward_optional_zero_fields"]["removed_fields"], 2)
+        self.assertNotIn("is_removal", row)
+        self.assertNotIn("hero_limit", row)
+        self.assertEqual(row["type"], 2)
+        self.assertEqual(row["num"], 1)
 
     def test_compact_profiles_keep_id_allocation_evidence(self) -> None:
         profiles = {

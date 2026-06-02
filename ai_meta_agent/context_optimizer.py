@@ -99,6 +99,9 @@ FAST_SCHEMA_FIELD_LIMIT_AI = 24
 FAST_PROFILE_FIELD_LIMIT_AI = 2
 FAST_RELATIONSHIP_LIMIT_AI = 6
 FAST_PLANNING_ROW_LIMIT_AI = 22
+MODEL_OPTIONAL_ZERO_FIELDS = {
+    "reward": {"is_removal", "hero_limit"},
+}
 
 
 def optimize_context_for_ai(context: dict[str, Any]) -> dict[str, Any]:
@@ -181,6 +184,7 @@ def compact_schema_for_ai(schema: dict[str, Any]) -> dict[str, Any]:
         aliases = table.get("field_aliases") or {}
         if aliases:
             compact["field_aliases"] = dict(list(aliases.items())[:40])
+        required_fields = _ai_required_fields(table_name, required_fields)
         if required_fields:
             compact["required_fields"] = required_fields
         if typed_fields:
@@ -554,8 +558,8 @@ def _fast_schema_for_ai(schema: dict[str, Any], targets: set[str]) -> dict[str, 
     for table_name, table in (schema.get("tables") or {}).items():
         if targets and table_name not in targets:
             continue
-        fields = _priority_fields(table.get("field_names") or [], table, FAST_SCHEMA_FIELD_LIMIT_AI)
-        required = [field for field in (table.get("required_fields") or []) if field in fields]
+        fields = _priority_fields(table_name, table.get("field_names") or [], table, FAST_SCHEMA_FIELD_LIMIT_AI)
+        required = [field for field in _ai_required_fields(table_name, table.get("required_fields") or []) if field in fields]
         compact = {
             "primary_key": table.get("primary_key") or [],
             "group_key": table.get("group_key"),
@@ -575,8 +579,8 @@ def _fast_schema_for_ai(schema: dict[str, Any], targets: set[str]) -> dict[str, 
     return {"tables": tables, "risk": schema.get("risk") or {}}
 
 
-def _priority_fields(fields: list[str], table: dict[str, Any], limit: int) -> list[str]:
-    required = table.get("required_fields") or []
+def _priority_fields(table_name: str, fields: list[str], table: dict[str, Any], limit: int) -> list[str]:
+    required = _ai_required_fields(table_name, table.get("required_fields") or [])
     anchors = [*(table.get("primary_key") or []), table.get("group_key"), *required]
     selected: list[str] = []
     seen: set[str] = set()
@@ -592,6 +596,11 @@ def _priority_fields(fields: list[str], table: dict[str, Any], limit: int) -> li
         seen.add(field)
         selected.append(field)
     return selected
+
+
+def _ai_required_fields(table_name: str, required_fields: list[str]) -> list[str]:
+    optional_zero_fields = MODEL_OPTIONAL_ZERO_FIELDS.get(table_name, set())
+    return [field for field in required_fields if field not in optional_zero_fields]
 
 
 def _field_name_priority(field: str) -> int:

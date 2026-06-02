@@ -7,6 +7,7 @@ from .models import Patch, SchemaBundle
 
 
 REWARD_SLOT_FIELD = re.compile(r"^(type|reward|num|weight)_(\d+)$")
+REWARD_OPTIONAL_ZERO_FIELDS = {"is_removal", "hero_limit"}
 
 
 def sanitize_patch(patch: Patch) -> dict[str, Any]:
@@ -14,6 +15,7 @@ def sanitize_patch(patch: Patch) -> dict[str, Any]:
     return {
         "blank_insert_fields": sanitize_blank_insert_fields(patch),
         "reward_unused_slots": sanitize_reward_unused_slots(patch),
+        "reward_optional_zero_fields": sanitize_reward_optional_zero_fields(patch),
     }
 
 
@@ -107,6 +109,33 @@ def sanitize_reward_unused_slots(patch: Patch) -> dict[str, Any]:
                     )
     return {
         "removed_field_groups": len(removed),
+        "removed_fields": sum(len(item["fields"]) for item in removed),
+        "items": removed,
+    }
+
+
+def sanitize_reward_optional_zero_fields(patch: Patch) -> dict[str, Any]:
+    removed: list[dict[str, Any]] = []
+    for operation_index, operation in enumerate(patch.operations):
+        if operation.target_table != "reward" or operation.op not in {"insert", "replace_group"}:
+            continue
+        for payload_name, row_index, row in _operation_rows(operation):
+            fields = {
+                field: row.pop(field)
+                for field in list(row)
+                if field in REWARD_OPTIONAL_ZERO_FIELDS and _is_zeroish(row.get(field))
+            }
+            if fields:
+                removed.append(
+                    {
+                        "operation_index": operation_index,
+                        "payload": payload_name,
+                        "row_index": row_index,
+                        "fields": fields,
+                        "reason": "reward optional default-zero fields are omitted unless planning evidence explicitly requires them",
+                    }
+                )
+    return {
         "removed_fields": sum(len(item["fields"]) for item in removed),
         "items": removed,
     }
