@@ -44,6 +44,7 @@ from ai_meta_agent.item_resolution import resolve_planning_items
 from ai_meta_agent.models import Manifest, Patch, PlanningSource, SchemaBundle, SheetIR, SourceKind, WorkbookIR
 from ai_meta_agent.patch_sanitizer import sanitize_patch
 from ai_meta_agent.patch_engine import apply_patch
+from ai_meta_agent.planning_parser import build_structured_planning
 from ai_meta_agent.relation_scanner import scan_relationships, split_reference_values
 from ai_meta_agent.schema import load_schema
 from ai_meta_agent.schema_scanner import scan_config_schema
@@ -1684,6 +1685,83 @@ class WorkflowTests(unittest.TestCase):
         self.assertLess(budget["optimized"]["bytes"], budget["original"]["bytes"])
         self.assertIn("resolved_items", optimized)
 
+    def test_structured_planning_keeps_exchange_shop_activity_and_item_fields(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "exchange-structured-sample",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [{"id": "feishu-planning", "kind": "feishu", "url": "https://example.test/planning", "role": "planning"}],
+            }
+        )
+        schema = SchemaBundle.model_validate(
+            {
+                "version": 1,
+                "tables": {
+                    "activity": {"primary_key": ["id"], "fields": {"id": {}, "活动标题": {}, "活动生效时间": {}, "活动类型": {}}},
+                    "active_shop": {
+                        "primary_key": ["id"],
+                        "fields": {"id": {}, "商品组": {}, "商品": {}, "价格": {}, "限购数量": {}, "消耗id": {}, "排序值": {}},
+                    },
+                    "reward": {"primary_key": ["id"], "fields": {"id": {}, "type_1": {}, "reward_1": {}, "num_1": {}}},
+                    "goods": {"primary_key": ["道具ID"], "fields": {"道具ID": {}}},
+                },
+            }
+        )
+        rows = [
+            {"__row": 6, "字段说明": "activity_id", "活动名": "name", "活动开始|结束时间": "server_activity_time", "时间类型": "time_type", "额外生效时间": "take_effect_time", "是否启用": "is_open", "活动类型": "type", "开启条件": "condition", "开关名": "switch_name"},
+            {"__row": 7, "策划备注": "2026航海节兑换店", "活动开始|结束时间": "2026-05-30 00:00:00|2026-06-06 23:59:59", "时间类型": 1, "额外生效时间": "2026-05-30 00:00:00|2026-06-06 23:59:59", "是否启用": 1, "活动类型": 7, "开启条件": "1|117|10", "开关名": "nav_shop_2026"},
+            {"__row": 10, "字段说明": "商店组", "活动名": "商店名称", "策划备注": "cost_id", "活动开始|结束时间": "cost_type", "时间类型": "排序起始", "额外生效时间": "排序步长", "结束后展示小时": "策划备注（活动"},
+            {"__row": 11, "字段说明": "付费兑换店", "活动名": "付费兑换店", "策划备注": 605092003, "活动开始|结束时间": 2, "时间类型": 10, "额外生效时间": 10, "结束后展示小时": "2026航海节付费兑换店"},
+            {"__row": 15, "字段说明": "商店组", "活动名": "序号", "策划备注": "标签备注", "活动开始|结束时间": "商品名", "时间类型": "道具数量", "额外生效时间": "价格", "结束后展示小时": "限购次数", "是否展示日历": "排序", "日历颜色": "道具显示分组", "日历描述": "分组标题"},
+            {"__row": 16, "字段说明": "付费兑换店", "活动名": 1, "策划备注": "限定", "活动开始|结束时间": "克拉肯", "时间类型": 1, "额外生效时间": 999, "结束后展示小时": 1, "是否展示日历": 10, "日历颜色": 1, "日历描述": "active_shop_title01"},
+        ]
+        workbook = WorkbookIR(
+            source_id="feishu-planning",
+            source_type=SourceKind.FEISHU,
+            url="https://example.test/planning",
+            sheets=[
+                SheetIR(
+                    name="2026年5月航海节活动",
+                    max_row=16,
+                    max_column=20,
+                    headers=list(rows[0].keys()),
+                    header_row=1,
+                    sample_rows=rows,
+                )
+            ],
+        )
+        resolution = {
+            "enabled": True,
+            "matches": [
+                {
+                    "product_name": "克拉肯",
+                    "reward_type": 7,
+                    "content_id": 323,
+                    "num": 1,
+                    "confidence": 0.86,
+                    "source": "item_base",
+                    "planning_ref": {"workbook": "feishu-planning", "sheet": "2026年5月航海节活动", "row": 16},
+                }
+            ],
+        }
+
+        structured = build_structured_planning(manifest, [workbook], resolution)
+        context = build_minimal_context(manifest, schema, [workbook], [], None, resolution)
+        optimized = optimize_context_for_ai(context)
+
+        source = structured["sources"][0]
+        self.assertEqual(source["activity_rows"][0]["server_activity_time"], "2026-05-30 00:00:00|2026-06-06 23:59:59")
+        self.assertEqual(source["shop_groups"][0]["cost_id"], 605092003)
+        self.assertEqual(source["shop_items"][0]["product_name"], "克拉肯")
+        self.assertEqual(source["shop_items"][0]["price"], 999)
+        self.assertEqual(source["shop_items"][0]["purchase_limit"], 1)
+        self.assertEqual(source["shop_items"][0]["resolved_reward"]["content_id"], 323)
+        self.assertIn("structured_planning", optimized)
+        ai_item = optimized["structured_planning"]["sources"][0]["shop_items"][0]
+        self.assertEqual(ai_item["planning_quantity"], 1)
+        self.assertEqual(ai_item["price"], 999)
+
     def test_hard_fast_budget_limits_model_tables_and_knowledge(self) -> None:
         tables = {}
         profiles = {}
@@ -1745,6 +1823,51 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(compact["ai_target_tables"], ["activity", "active_shop", "reward", "goods"])
         self.assertLessEqual(budget["rows"]["planning_evidence_rows_sent_to_ai"], 22)
         self.assertLessEqual(len(compact["similar_cases"]), 1)
+
+    def test_fast_schema_keeps_reward_quantity_fields(self) -> None:
+        context = {
+            "target_tables": ["reward"],
+            "schema": {
+                "tables": {
+                    "reward": {
+                        "primary_key": ["id"],
+                        "field_names": [
+                            "id",
+                            "type",
+                            "is_removal",
+                            "num",
+                            "hero_limit",
+                            "level_limit",
+                            "building_ratio",
+                            "is_repay",
+                            "type_1",
+                            "reward_1",
+                            "num_1",
+                            "weight_1",
+                            "type_2",
+                            "reward_2",
+                            "num_2",
+                            "weight_2",
+                            "type_3",
+                            "reward_3",
+                            "num_3",
+                            "weight_3",
+                        ],
+                        "required_fields": ["id", "is_removal", "hero_limit", "type_1"],
+                    }
+                }
+            },
+            "target_table_profiles": {"reward": {"primary_key": ["id"], "next_values": {"id": 100}}},
+            "planning_evidence": [],
+            "resolved_items": [{"product_name": "item", "reward_type": 2, "content_id": 100, "num": 5}],
+            "similar_cases": [{"case_id": str(index), "content": "x" * 2000} for index in range(40)],
+        }
+
+        compact = enforce_fast_context_budget(context)
+        fields = compact["schema"]["tables"]["reward"]["field_names"]
+
+        self.assertIn("num_1", fields)
+        self.assertIn("weight_1", fields)
 
     def test_compact_profiles_keep_id_allocation_evidence(self) -> None:
         profiles = {

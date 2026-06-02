@@ -419,6 +419,7 @@ function collectArtifact(result) {
   if (parsed.structured_correction) artifact.structuredCorrection = maybeReadJson(parsed.structured_correction);
   if (parsed.run_error) artifact.runError = maybeReadJson(parsed.run_error);
   if (parsed.relationship_map) artifact.relationshipMap = maybeReadJson(parsed.relationship_map);
+  if (parsed.structured_planning) artifact.structuredPlanning = maybeReadJson(parsed.structured_planning);
   if (parsed.planning_item_resolution) artifact.planningItemResolution = maybeReadJson(parsed.planning_item_resolution);
   if (parsed.context_budget) artifact.contextBudget = maybeReadJson(parsed.context_budget);
   if (parsed.draft_timing) artifact.draftTiming = maybeReadJson(parsed.draft_timing);
@@ -429,6 +430,7 @@ function collectArtifact(result) {
   if (parsed.run_dir) {
     artifact.analysis = summarizeAnalysis(path.join(parsed.run_dir, "analysis.json"));
     artifact.relationshipMap = artifact.relationshipMap || maybeReadJson(path.join(parsed.run_dir, "relationship-map.json"));
+    artifact.structuredPlanning = artifact.structuredPlanning || maybeReadJson(path.join(parsed.run_dir, "planning-structured.json"));
     artifact.planningItemResolution = artifact.planningItemResolution || maybeReadJson(path.join(parsed.run_dir, "planning-item-resolution.json"));
     artifact.contextBudget = artifact.contextBudget || maybeReadJson(path.join(parsed.run_dir, "context-budget.json"));
     artifact.draftTiming = artifact.draftTiming || maybeReadJson(path.join(parsed.run_dir, "draft-timing.json"));

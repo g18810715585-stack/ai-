@@ -5,6 +5,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from .planning_parser import compact_structured_planning_for_ai
+
 
 VALUE_SOURCE_KEYWORDS = ("item_base", "value", "价值")
 PLANNING_ROW_KEYWORDS = (
@@ -66,6 +68,9 @@ PROFILE_PRIORITY_KEYWORDS = (
     "price",
     "time",
     "type",
+    "num",
+    "count",
+    "weight",
     "shop",
     "活动",
     "商品",
@@ -90,7 +95,7 @@ PLAN_CORRECTION_LIMIT_AI = 3
 KNOWLEDGE_STRING_LIMIT_AI = 160
 FAST_CONTEXT_MAX_BYTES = 32 * 1024
 FAST_TABLE_LIMIT_AI = 4
-FAST_SCHEMA_FIELD_LIMIT_AI = 16
+FAST_SCHEMA_FIELD_LIMIT_AI = 24
 FAST_PROFILE_FIELD_LIMIT_AI = 2
 FAST_RELATIONSHIP_LIMIT_AI = 6
 FAST_PLANNING_ROW_LIMIT_AI = 22
@@ -109,6 +114,8 @@ def optimize_context_for_ai(context: dict[str, Any]) -> dict[str, Any]:
     optimized["value_table_summary"] = _value_table_summary(context)
     optimized["resolved_items"] = _resolved_items(context)
     optimized["unresolved_item_candidates"] = _unresolved_item_candidates(context)
+    if "structured_planning" in optimized:
+        optimized["structured_planning"] = compact_structured_planning_for_ai(context.get("structured_planning") or {})
     if "planning_item_resolution" in optimized:
         optimized["planning_item_resolution"] = _planning_resolution_summary(context)
     if "schema" in optimized:
@@ -383,6 +390,8 @@ def enforce_fast_context_budget(context: dict[str, Any]) -> dict[str, Any]:
 
 def _enforce_hard_context_budget(context: dict[str, Any]) -> dict[str, Any]:
     compact = deepcopy(context)
+    if "structured_planning" in compact:
+        compact["structured_planning"] = compact_structured_planning_for_ai(compact.get("structured_planning") or {}, item_limit=48)
     compact["planning_evidence"] = _hard_planning_evidence(compact.get("planning_evidence") or [])
     compact["relationship_map"] = _hard_relationship_map(compact.get("relationship_map") or {})
     compact["config_plan"] = _hard_config_plan(compact.get("config_plan") or {})
@@ -593,6 +602,11 @@ def _field_name_priority(field: str) -> int:
             score += 10
     if any(value in text.lower() for value in ("id", "type", "group", "reward", "goods", "cost", "price", "order", "time", "form", "list")):
         score += 20
+    lowered = text.lower()
+    if lowered.startswith(("type_", "reward_", "num_", "weight_")):
+        score += 45
+    if any(value in text.lower() for value in ("num", "count", "weight")) or any(value in text for value in ("数量", "权重", "道具数量")):
+        score += 35
     return score
 
 
@@ -675,6 +689,12 @@ def _planning_row_priority(row: dict[str, Any]) -> int:
     text = " ".join(str(value) for key, value in row.items() if key != "__row" and value not in (None, ""))
     keys = " ".join(str(key) for key in row if key != "__row")
     score = 0
+    if any(keyword in text or keyword in keys for keyword in ["商品", "商品名", "道具", "道具数量", "价格", "限购", "商店组", "排序", "分组"]):
+        score += 90
+    if any(keyword in text or keyword in keys for keyword in ["活动开始", "活动结束", "活动时间", "开启条件", "是否启用", "开关名", "活动类型"]):
+        score += 55
+    if any(keyword in text for keyword in ["填写规范", "字段说明", "工具会", "不要删除", "标签规范"]):
+        score -= 45
     if any(keyword in text or keyword in keys for keyword in ["鍟嗗搧", "閬撳叿", "濂栧姳", "商品", "道具", "奖励"]):
         score += 60
     if any(keyword in text or keyword in keys for keyword in ["浠锋牸", "闄愯喘", "消耗", "价格", "限购"]):

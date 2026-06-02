@@ -238,6 +238,7 @@ function stepPaths(parsed) {
       draft_table_preview: parsed.draft_table_preview,
       draft_diagnostics: parsed.draft_diagnostics,
       draft_timing: parsed.draft_timing,
+      structured_planning: parsed.structured_planning,
       patch: parsed.patch,
       result: parsed.result,
       configuration_record: parsed.configuration_record,
@@ -322,6 +323,7 @@ function stepData(step, artifact = {}, parsed = {}) {
     return {
       analysis: artifact.analysis || null,
       relationshipMap: compactRelationshipMap(artifact.relationshipMap || {}),
+      structuredPlanning: artifact.structuredPlanning || artifact.analysis?.structured_planning || null,
       planningItemResolution: artifact.planningItemResolution || artifact.analysis?.planning_item_resolution || null,
       configPlan: artifact.configPlan || null
     };
@@ -333,6 +335,7 @@ function stepData(step, artifact = {}, parsed = {}) {
       draftDiagnostics: artifact.draftDiagnostics || null,
       draftTablePreview: artifact.draftTablePreview || null,
       draftTiming: artifact.draftTiming || null,
+      structuredPlanning: artifact.structuredPlanning || artifact.analysis?.structured_planning || null,
       relationshipMap: compactRelationshipMap(artifact.relationshipMap || {})
     };
   }

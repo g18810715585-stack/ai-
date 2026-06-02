@@ -230,6 +230,7 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
         "config_discovery": config_discovery,
         "relationship_map": relationship_map,
         "planning_item_resolution": item_resolution,
+        "structured_planning": context.get("structured_planning") or {},
         "target_table_profiles": target_table_profiles,
         "experience": experience,
         "config_plan": experience["config_plan"],
@@ -240,6 +241,7 @@ def analyze_manifest(manifest_path: Path, base_dir: Path, label: str = "analysis
     write_json(run_dir / "context-budget.json", context_budget)
     write_json(run_dir / "config-plan.json", experience["config_plan"])
     write_json(run_dir / "planning-item-resolution.json", item_resolution)
+    write_json(run_dir / "planning-structured.json", context.get("structured_planning") or {})
     write_json(run_dir / "value-candidates.json", compact_items)
     write_text(run_dir / "analysis.md", summarize_analysis(workbooks, schema, matched))
     return manifest, schema, run_dir, context
@@ -255,6 +257,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         "run_dir": str(run_dir),
         "source_errors": analysis_context.get("source_errors", []),
         "context_budget": str(run_dir / "context-budget.json"),
+        "structured_planning": str(run_dir / "planning-structured.json"),
         "planning_item_resolution": str(run_dir / "planning-item-resolution.json"),
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))
@@ -603,6 +606,7 @@ def cmd_draft(args: argparse.Namespace) -> int:
                 "patch_sanitizer": str(run_dir / "patch-sanitizer.json"),
                 "context_budget": str(run_dir / "context-budget.json"),
                 "draft_timing": str(run_dir / "draft-timing.json"),
+                "structured_planning": str(run_dir / "planning-structured.json"),
                 "planning_item_resolution": str(run_dir / "planning-item-resolution.json"),
                 "value_candidates": str(run_dir / "value-candidates.json"),
                 "operations": len(patch.operations),

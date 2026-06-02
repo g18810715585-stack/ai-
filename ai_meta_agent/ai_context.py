@@ -4,6 +4,7 @@ from typing import Any
 
 from .habits import habit_context
 from .models import Habit, Manifest, SchemaBundle, WorkbookIR
+from .planning_parser import build_structured_planning
 
 PLANNING_CONTEXT_SAMPLE_ROWS = 200
 VALUE_CONTEXT_SAMPLE_ROWS = 5000
@@ -240,6 +241,8 @@ def build_minimal_context(
             "Every operation must include target_table, source_ref, reason, confidence, risk_level.",
             "Do not invent objects not present in planning rows or habits.",
             "When planning_item_resolution is present, use it as evidence for product reward type, content ID, and quantity.",
+            "When structured_planning is present, use it as the primary evidence for activity fields, shop groups, item prices, purchase limits, sort order, labels, and planning quantities.",
+            "For exchange shop drafts, active_shop rows should use structured_planning.shop_groups and structured_planning.shop_items instead of guessing from product names only.",
             "Mark low-confidence or high-risk operations as needs_confirmation=true.",
             "If an activity template, field mappings, relationships, and planning rows provide enough evidence, generate a supervised patch even when some fields still need confirmation.",
             "Do not return an empty patch only because non-critical fields are missing; write the evidenced fields and leave uncertain values out or mark the operation high risk with needs_confirmation=true.",
@@ -275,6 +278,9 @@ def build_minimal_context(
         context["target_table_profiles"] = target_table_profiles
     if item_resolution:
         context["planning_item_resolution"] = item_resolution
+        structured_planning = build_structured_planning(manifest, workbooks, item_resolution)
+        if structured_planning.get("sources"):
+            context["structured_planning"] = structured_planning
     compact_experience = _compact_experience(experience)
     if compact_experience:
         context.update(compact_experience)
