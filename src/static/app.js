@@ -1296,9 +1296,11 @@ async function callApi(route, payload, { label = "处理" } = {}) {
   }
   rawText.textContent = JSON.stringify(data, null, 2);
   if (!response.ok) {
+    const summary = parseStdout(data);
+    const message = data.error || data.artifact?.runError?.error || summary.error || data.stderr || "请求失败";
     setStatus(`${label}失败`, "error");
     showTab("raw");
-    throw new Error(data.error || data.stderr || "请求失败");
+    throw new Error(message);
   }
   setStatus(`${label}完成`, "ok");
   if (data.project) {
@@ -2166,7 +2168,11 @@ document.querySelector("#draftBtn").addEventListener("click", (event) => runActi
     setStatus(`草案没有可执行变更，已跳过生成预览${suffix}`, "ok");
     return;
   }
-  await applyCurrentPatch("preview", "生成预览");
+  try {
+    await applyCurrentPatch("preview", "生成预览");
+  } catch (error) {
+    throw new Error(`草案已生成，但生成预览失败：${error.message}`);
+  }
   setStatus("草案和预览已生成", "ok");
 }));
 
