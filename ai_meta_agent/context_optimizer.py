@@ -88,10 +88,12 @@ PLAN_RULE_LIMIT_AI = 4
 PLAN_CASE_LIMIT_AI = 2
 PLAN_CORRECTION_LIMIT_AI = 3
 KNOWLEDGE_STRING_LIMIT_AI = 160
-FAST_CONTEXT_MAX_BYTES = 64 * 1024
-FAST_SCHEMA_FIELD_LIMIT_AI = 28
-FAST_PROFILE_FIELD_LIMIT_AI = 4
-FAST_RELATIONSHIP_LIMIT_AI = 10
+FAST_CONTEXT_MAX_BYTES = 32 * 1024
+FAST_TABLE_LIMIT_AI = 4
+FAST_SCHEMA_FIELD_LIMIT_AI = 16
+FAST_PROFILE_FIELD_LIMIT_AI = 2
+FAST_RELATIONSHIP_LIMIT_AI = 6
+FAST_PLANNING_ROW_LIMIT_AI = 22
 
 
 def optimize_context_for_ai(context: dict[str, Any]) -> dict[str, Any]:
@@ -266,6 +268,7 @@ def compact_config_plan_for_ai(plan: dict[str, Any]) -> dict[str, Any]:
     compact["similar_case_summaries"] = [_truncate(item, 240) for item in (compact.get("similar_case_summaries") or [])[:PLAN_CASE_LIMIT_AI]]
     compact["structured_corrections"] = _compact_knowledge_items(compact.get("structured_corrections") or [], PLAN_CORRECTION_LIMIT_AI)
     _replace_plan_knowledge_with_counts(compact)
+    compact["id_strategy"] = _compact_id_strategy(compact.get("id_strategy") or {})
     compact["pending_confirmations"] = [_truncate(item, 220) for item in (compact.get("pending_confirmations") or [])[:12]]
     compact["missing_information"] = [_truncate(item, 180) for item in (compact.get("missing_information") or [])[:8]]
     compact["required_fields"] = _compact_required_fields(compact.get("required_fields") or {})
@@ -275,6 +278,30 @@ def compact_config_plan_for_ai(plan: dict[str, Any]) -> dict[str, Any]:
         "headers": (planning_signals.get("headers") or [])[:40],
     }
     return _drop_empty(compact)
+
+
+def _compact_id_strategy(strategy: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(strategy, dict):
+        return {}
+    result: dict[str, Any] = {}
+    if strategy.get("template_rule"):
+        result["template_rule"] = _truncate(strategy.get("template_rule"), 500)
+    field_rules = strategy.get("field_rules") or {}
+    if isinstance(field_rules, dict):
+        compact_rules = {}
+        for table_name, rules in list(field_rules.items())[:6]:
+            compact_rules[table_name] = [
+                {
+                    "field": item.get("field"),
+                    "strategy": item.get("strategy"),
+                    "risk_note": _truncate(item.get("risk_note"), 120),
+                    "confidence": item.get("confidence"),
+                }
+                for item in (rules or [])[:3]
+                if isinstance(item, dict)
+            ]
+        result["field_rules"] = _drop_empty(compact_rules)
+    return _drop_empty(result)
 
 
 def _replace_plan_knowledge_with_counts(plan: dict[str, Any]) -> None:
@@ -329,11 +356,15 @@ def enforce_fast_context_budget(context: dict[str, Any]) -> dict[str, Any]:
     if _json_bytes(context) <= FAST_CONTEXT_MAX_BYTES:
         return context
     compact = deepcopy(context)
-    targets = set(compact.get("target_tables") or [])
+    fast_tables = _fast_table_scope(compact)
+    targets = set(fast_tables)
+    compact["ai_target_tables"] = fast_tables
+    compact["target_tables"] = fast_tables
     compact["schema"] = _fast_schema_for_ai(compact.get("schema") or {}, targets)
     compact["target_table_profiles"] = _fast_target_table_profiles(compact.get("target_table_profiles") or {}, targets)
     compact["relationship_map"] = _fast_relationship_map(compact.get("relationship_map") or {})
     compact["planning_evidence"] = _fast_planning_evidence(compact.get("planning_evidence") or [])
+    compact["config_plan"] = compact_config_plan_for_ai(compact.get("config_plan") or {})
     compact["matched_field_mappings"] = _compact_knowledge_items(compact.get("matched_field_mappings") or [], 4)
     compact["field_dictionary_matches"] = _compact_knowledge_items(compact.get("field_dictionary_matches") or [], 5)
     compact["matched_rules"] = _compact_knowledge_items(compact.get("matched_rules") or [], 3)
@@ -343,8 +374,170 @@ def enforce_fast_context_budget(context: dict[str, Any]) -> dict[str, Any]:
     optimization = compact.setdefault("context_optimization", {})
     optimization["mode"] = "fast_budget_local_evidence_first"
     optimization["max_context_bytes"] = FAST_CONTEXT_MAX_BYTES
+    optimization["ai_target_tables"] = fast_tables
     optimization.setdefault("notes", []).append("上下文超过快速预算时，只发送关键写表字段和 ID 依据；完整表画像仍保存在本地用于确定性后处理。")
+    if _json_bytes(compact) > FAST_CONTEXT_MAX_BYTES:
+        compact = _enforce_hard_context_budget(compact)
     return compact
+
+
+def _enforce_hard_context_budget(context: dict[str, Any]) -> dict[str, Any]:
+    compact = deepcopy(context)
+    compact["planning_evidence"] = _hard_planning_evidence(compact.get("planning_evidence") or [])
+    compact["relationship_map"] = _hard_relationship_map(compact.get("relationship_map") or {})
+    compact["config_plan"] = _hard_config_plan(compact.get("config_plan") or {})
+    compact["matched_activity_templates"] = _hard_activity_templates(compact.get("matched_activity_templates") or [])
+    compact["matched_field_mappings"] = _hard_field_mappings(compact.get("matched_field_mappings") or [])
+    compact["field_dictionary_matches"] = _hard_field_dictionary(compact.get("field_dictionary_matches") or [])
+    compact["matched_rules"] = _hard_rules(compact.get("matched_rules") or [])
+    compact["structured_corrections"] = _hard_corrections(compact.get("structured_corrections") or [])
+    compact["similar_cases"] = []
+    compact["similar_case_summaries"] = [_truncate_deep(item, 100) for item in (compact.get("similar_case_summaries") or [])[:1]]
+    compact["matched_habits"] = (compact.get("matched_habits") or [])[:2]
+    optimization = compact.setdefault("context_optimization", {})
+    optimization["mode"] = "hard_fast_budget_local_evidence_first"
+    optimization["hard_budget_applied"] = True
+    return compact
+
+
+def _hard_planning_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result = []
+    for item in items[:1]:
+        rows = []
+        for row in (item.get("rows") or [])[:18]:
+            rows.append({key: _truncate(value, 80) for key, value in row.items()})
+        result.append(_drop_empty({"source_id": item.get("source_id"), "sheet": item.get("sheet"), "rows": rows, "row_count": len(rows)}))
+    return result
+
+
+def _hard_relationship_map(result: dict[str, Any]) -> dict[str, Any]:
+    return _drop_empty(
+        {
+            "target_tables": result.get("target_tables") or [],
+            "recommended_tables": (result.get("recommended_tables") or [])[:6],
+            "relations": (result.get("relations") or [])[:4],
+        }
+    )
+
+
+def _hard_config_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    return _drop_empty(
+        {
+            "activity_type": plan.get("activity_type"),
+            "confidence": plan.get("confidence"),
+            "run_instruction": _truncate(plan.get("run_instruction"), 500),
+            "current_target_tables": (plan.get("current_target_tables") or [])[:8],
+            "relation_chain": (plan.get("relation_chain") or [])[:8],
+            "required_fields": _compact_required_fields(plan.get("required_fields") or {}),
+            "id_strategy": _compact_id_strategy(plan.get("id_strategy") or {}),
+            "missing_information": [_truncate(item, 120) for item in (plan.get("missing_information") or [])[:5]],
+            "pending_confirmations": [_truncate(item, 120) for item in (plan.get("pending_confirmations") or [])[:5]],
+            "readiness": plan.get("readiness") or {},
+        }
+    )
+
+
+def _hard_activity_templates(items: list[Any]) -> list[Any]:
+    result = []
+    for item in items[:1]:
+        if isinstance(item, dict):
+            result.append(_drop_empty({"name": item.get("name"), "target_tables": (item.get("target_tables") or [])[:8], "relation_chain": (item.get("relation_chain") or [])[:8]}))
+    return result
+
+
+def _hard_field_mappings(items: list[Any]) -> list[Any]:
+    result = []
+    for item in items[:3]:
+        if isinstance(item, dict):
+            result.append(_drop_empty({"source_aliases": (item.get("source_aliases") or [])[:4], "target_table": item.get("target_table"), "target_field": item.get("target_field"), "confidence": item.get("confidence")}))
+    return result
+
+
+def _hard_field_dictionary(items: list[Any]) -> list[Any]:
+    result = []
+    for item in items[:3]:
+        if isinstance(item, dict):
+            result.append(_drop_empty({"target_table": item.get("target_table"), "target_field": item.get("target_field"), "description": _truncate(item.get("description"), 100), "id_strategy": item.get("id_strategy"), "reference_table": item.get("reference_table")}))
+    return result
+
+
+def _hard_rules(items: list[Any]) -> list[Any]:
+    result = []
+    for item in items[:2]:
+        if isinstance(item, dict):
+            result.append(_drop_empty({"title": _truncate(item.get("title") or item.get("summary_title") or item.get("name"), 90), "text": _truncate(item.get("text") or item.get("rule") or item.get("content"), 180), "applies_to_tables": (item.get("applies_to_tables") or [])[:6]}))
+    return result
+
+
+def _hard_corrections(items: list[Any]) -> list[Any]:
+    result = []
+    for item in items[:1]:
+        if isinstance(item, dict):
+            result.append(
+                _drop_empty(
+                    {
+                        "target_tables": (item.get("target_tables") or [])[:6],
+                        "target_fields": (item.get("target_fields") or [])[:12],
+                        "error_pattern": _truncate(item.get("error_pattern"), 140),
+                        "correct_practice": _truncate(item.get("correct_practice"), 220),
+                        "avoid_next_time": [_truncate(value, 120) for value in (item.get("avoid_next_time") or [])[:3]],
+                    }
+                )
+            )
+    return result
+
+
+def _fast_table_scope(context: dict[str, Any]) -> list[str]:
+    """Pick the tables the model should actively reason about.
+
+    The full run still keeps all selected tables locally for validation and
+    preview generation. This model-facing scope trims reference-only tables
+    when the project selected many related sheets but only a few have direct
+    write evidence.
+    """
+    available = set((context.get("schema") or {}).get("tables") or {})
+    selected = [table for table in (context.get("target_tables") or []) if table in available]
+    plan = context.get("config_plan") or {}
+    priority: dict[str, int] = {}
+
+    def bump(table: Any, score: int) -> None:
+        name = str(table or "").strip()
+        if name and name in available:
+            priority[name] = max(priority.get(name, 0), score)
+
+    for index, table in enumerate(plan.get("relation_chain") or []):
+        bump(table, 120 - index)
+    for table in (plan.get("required_fields") or {}):
+        bump(table, 115)
+    if context.get("resolved_items"):
+        for table in ["activity", "active_shop", "reward", "goods"]:
+            bump(table, 112)
+    for item in context.get("field_dictionary_matches") or []:
+        bump(item.get("target_table"), 100)
+    for item in context.get("matched_field_mappings") or []:
+        bump(item.get("target_table"), 95)
+    for item in context.get("structured_corrections") or []:
+        for table in item.get("target_tables") or []:
+            bump(table, 90)
+    for table, profile in (context.get("target_table_profiles") or {}).items():
+        if profile.get("next_values"):
+            bump(table, 80)
+    for table in selected:
+        bump(table, 70)
+    if plan.get("activity_type"):
+        bump("activity", 110)
+
+    ordered = sorted(
+        priority,
+        key=lambda table: (
+            -priority[table],
+            selected.index(table) if table in selected else 999,
+            table,
+        ),
+    )
+    if not ordered:
+        ordered = selected
+    return ordered[:FAST_TABLE_LIMIT_AI]
 
 
 def _fast_schema_for_ai(schema: dict[str, Any], targets: set[str]) -> dict[str, Any]:
@@ -422,7 +615,6 @@ def _fast_target_table_profiles(profiles: dict[str, Any], targets: set[str]) -> 
                 "primary_key": profile.get("primary_key") or [],
                 "group_key": profile.get("group_key"),
                 "next_values": profile.get("next_values") or {},
-                "generation_summary": profile.get("generation_summary") or {},
                 "fields": fields,
             }
         )
@@ -463,8 +655,10 @@ def _fast_planning_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]
     compact_items = []
     for item in items[:2]:
         rows = []
-        for row in (item.get("rows") or [])[:48]:
-            rows.append({key: _truncate(value, 120) for key, value in row.items()})
+        source_rows = list(item.get("rows") or [])
+        source_rows.sort(key=lambda row: (-_planning_row_priority(row), int(row.get("__row") or 0)))
+        for row in source_rows[:FAST_PLANNING_ROW_LIMIT_AI]:
+            rows.append({key: _truncate(value, 100) for key, value in row.items()})
         compact_items.append(
             {
                 "source_id": item.get("source_id"),
@@ -475,6 +669,25 @@ def _fast_planning_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]
             }
         )
     return compact_items
+
+
+def _planning_row_priority(row: dict[str, Any]) -> int:
+    text = " ".join(str(value) for key, value in row.items() if key != "__row" and value not in (None, ""))
+    keys = " ".join(str(key) for key in row if key != "__row")
+    score = 0
+    if any(keyword in text or keyword in keys for keyword in ["鍟嗗搧", "閬撳叿", "濂栧姳", "商品", "道具", "奖励"]):
+        score += 60
+    if any(keyword in text or keyword in keys for keyword in ["浠锋牸", "闄愯喘", "消耗", "价格", "限购"]):
+        score += 45
+    if any(keyword in text or keyword in keys for keyword in ["娲诲姩", "活动", "time", "时间", "开启条件"]):
+        score += 35
+    if any(keyword in text or keyword in keys for keyword in ["group", "缁?", "组", "form_list", "商店组"]):
+        score += 30
+    if any(value in str(row.get("字段说明") or "").lower() for value in ["activity_id", "cost_id", "type"]):
+        score -= 10
+    if len(row) > 12:
+        score -= 5
+    return score
 
 
 def build_context_budget(original: dict[str, Any], optimized: dict[str, Any]) -> dict[str, Any]:
@@ -531,17 +744,17 @@ def _relationship_priority(relation: dict[str, Any], targets: set[str], recommen
 
 def _compact_top_level_knowledge(context: dict[str, Any]) -> None:
     limits = {
-        "matched_field_mappings": 6,
-        "field_dictionary_matches": 8,
-        "matched_rules": 5,
-        "similar_cases": 2,
-        "structured_corrections": 2,
+        "matched_field_mappings": 4,
+        "field_dictionary_matches": 5,
+        "matched_rules": 3,
+        "similar_cases": 1,
+        "structured_corrections": 1,
     }
     for key, limit in limits.items():
         if key in context:
             context[key] = _compact_knowledge_items(context.get(key) or [], limit)
     if "similar_case_summaries" in context:
-        context["similar_case_summaries"] = [_truncate_deep(item, 160) for item in (context.get("similar_case_summaries") or [])[:2]]
+        context["similar_case_summaries"] = [_truncate_deep(item, 120) for item in (context.get("similar_case_summaries") or [])[:1]]
 
 
 def _compact_knowledge_items(items: list[Any], limit: int) -> list[Any]:
@@ -717,8 +930,21 @@ def _compact_resolved_item(item: dict[str, Any]) -> dict[str, Any]:
             "num": item.get("num"),
             "confidence": item.get("confidence"),
             "needs_confirmation": item.get("needs_confirmation"),
-            "planning_ref": item.get("planning_ref"),
-            "value_ref": item.get("value_ref"),
+            "planning_ref": _compact_source_ref(item.get("planning_ref") or {}),
+            "value_ref": _compact_source_ref(item.get("value_ref") or {}),
+        }
+    )
+
+
+def _compact_source_ref(ref: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(ref, dict):
+        return {}
+    return _drop_empty(
+        {
+            "workbook": ref.get("workbook"),
+            "sheet": ref.get("sheet"),
+            "row": ref.get("row"),
+            "field": ref.get("field"),
         }
     )
 

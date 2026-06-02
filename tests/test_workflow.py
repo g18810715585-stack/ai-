@@ -16,7 +16,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from ai_meta_agent.ai_context import build_minimal_context
 from ai_meta_agent.cli import _auto_expand_generation_tables, analyze_manifest
 from ai_meta_agent.configuration_records import build_configuration_record, local_case_review, save_case_review
-from ai_meta_agent.context_optimizer import build_context_budget, compact_target_table_profiles, optimize_context_for_ai
+from ai_meta_agent.context_optimizer import build_context_budget, compact_target_table_profiles, enforce_fast_context_budget, optimize_context_for_ai
 from ai_meta_agent.draft import call_baseai, call_draft_diagnostics_ai, call_experience_summary_ai, call_relationship_ai, make_stub_patch
 from ai_meta_agent.draft_diagnostics import build_draft_diagnostics, compact_draft_diagnostic_context
 from ai_meta_agent.draft_preview import build_draft_table_preview
@@ -1681,6 +1681,68 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(budget["rows"]["value_sample_rows_sent_to_ai"], 0)
         self.assertLess(budget["optimized"]["bytes"], budget["original"]["bytes"])
         self.assertIn("resolved_items", optimized)
+
+    def test_hard_fast_budget_limits_model_tables_and_knowledge(self) -> None:
+        tables = {}
+        profiles = {}
+        target_tables = ["activity", "active_shop", "reward", "goods", "key", "jump", "exchange", "activity_drop"]
+        for table_name in target_tables:
+            field_names = ["id", "group", "reward", "goods", "price", *[f"field_{index}" for index in range(40)]]
+            tables[table_name] = {
+                "primary_key": ["id"],
+                "group_key": "group",
+                "field_names": field_names,
+                "required_fields": field_names[:12],
+                "field_types": {field: "int" for field in field_names[:20]},
+            }
+            profiles[table_name] = {
+                "primary_key": ["id"],
+                "group_key": "group",
+                "next_values": {"id": 1000, "group": 80},
+                "fields": {
+                    field: {"field": field, "next_value": 1000, "sample_values": ["x" * 80], "enum_values": [1, 2, 3, 4]}
+                    for field in field_names
+                },
+            }
+        context = {
+            "target_tables": target_tables,
+            "schema": {"tables": tables},
+            "target_table_profiles": profiles,
+            "planning_evidence": [
+                {
+                    "source_id": "plan",
+                    "sheet": "planning",
+                    "rows": [{"__row": index, "商品": f"item-{index}", "价格": index, "长说明": "x" * 220} for index in range(80)],
+                }
+            ],
+            "resolved_items": [
+                {
+                    "product_name": f"item-{index}",
+                    "reward_type": 7,
+                    "content_id": index,
+                    "planning_ref": {"workbook": "plan", "sheet": "planning", "row": index, "url": "https://example.com/" + "x" * 120},
+                }
+                for index in range(24)
+            ],
+            "config_plan": {
+                "activity_type": "兑换商店活动",
+                "relation_chain": ["activity", "active_shop", "reward", "goods", "key", "jump"],
+                "id_strategy": {"template_rule": "active_shop 和 activity 都按最新 ID 递增。" * 80},
+                "required_fields": {"activity": ["id", "type"], "active_shop": ["id", "goods"]},
+            },
+            "similar_cases": [{"case_id": str(index), "correction": "x" * 1200} for index in range(6)],
+            "matched_rules": [{"title": "rule", "text": "x" * 1200, "applies_to_tables": target_tables} for _ in range(6)],
+            "structured_corrections": [{"correct_practice": "x" * 1200, "target_tables": target_tables} for _ in range(4)],
+        }
+
+        compact = enforce_fast_context_budget(context)
+        budget = build_context_budget(context, compact)
+
+        self.assertIn((compact["context_optimization"] or {})["mode"], {"fast_budget_local_evidence_first", "hard_fast_budget_local_evidence_first"})
+        self.assertLessEqual(budget["optimized"]["bytes"], 32 * 1024)
+        self.assertEqual(compact["ai_target_tables"], ["activity", "active_shop", "reward", "goods"])
+        self.assertLessEqual(budget["rows"]["planning_evidence_rows_sent_to_ai"], 22)
+        self.assertLessEqual(len(compact["similar_cases"]), 1)
 
     def test_compact_profiles_keep_id_allocation_evidence(self) -> None:
         profiles = {
