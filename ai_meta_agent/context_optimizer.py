@@ -46,11 +46,11 @@ PROFILE_FIELD_KEYS = (
     "sample_values",
     "top_values",
 )
-PROFILE_FIELD_LIMIT_AI = 18
-PROFILE_TAIL_ROW_LIMIT_AI = 3
-PROFILE_SAMPLE_VALUE_LIMIT_AI = 3
-PROFILE_TOP_VALUE_LIMIT_AI = 3
-PROFILE_ENUM_VALUE_LIMIT_AI = 8
+PROFILE_FIELD_LIMIT_AI = 7
+PROFILE_TAIL_ROW_LIMIT_AI = 1
+PROFILE_SAMPLE_VALUE_LIMIT_AI = 2
+PROFILE_TOP_VALUE_LIMIT_AI = 2
+PROFILE_ENUM_VALUE_LIMIT_AI = 5
 PROFILE_PRIORITY_KEYWORDS = (
     "id",
     "ID",
@@ -81,13 +81,13 @@ PROFILE_PRIORITY_KEYWORDS = (
     "排序",
 )
 SCHEMA_RELATIONSHIP_CANDIDATE_LIMIT_AI = 30
-RELATIONSHIP_LIMIT_AI = 28
-PLAN_FIELD_MAPPING_LIMIT_AI = 12
-PLAN_FIELD_DICTIONARY_LIMIT_AI = 16
-PLAN_RULE_LIMIT_AI = 6
-PLAN_CASE_LIMIT_AI = 3
-PLAN_CORRECTION_LIMIT_AI = 5
-KNOWLEDGE_STRING_LIMIT_AI = 320
+RELATIONSHIP_LIMIT_AI = 18
+PLAN_FIELD_MAPPING_LIMIT_AI = 8
+PLAN_FIELD_DICTIONARY_LIMIT_AI = 10
+PLAN_RULE_LIMIT_AI = 4
+PLAN_CASE_LIMIT_AI = 2
+PLAN_CORRECTION_LIMIT_AI = 3
+KNOWLEDGE_STRING_LIMIT_AI = 160
 
 
 def optimize_context_for_ai(context: dict[str, Any]) -> dict[str, Any]:
@@ -103,6 +103,8 @@ def optimize_context_for_ai(context: dict[str, Any]) -> dict[str, Any]:
     optimized["value_table_summary"] = _value_table_summary(context)
     optimized["resolved_items"] = _resolved_items(context)
     optimized["unresolved_item_candidates"] = _unresolved_item_candidates(context)
+    if "planning_item_resolution" in optimized:
+        optimized["planning_item_resolution"] = _planning_resolution_summary(context)
     if "schema" in optimized:
         optimized["schema"] = compact_schema_for_ai(context.get("schema") or {})
     if "relationship_map" in optimized:
@@ -259,6 +261,7 @@ def compact_config_plan_for_ai(plan: dict[str, Any]) -> dict[str, Any]:
     compact["similar_cases"] = _compact_knowledge_items(compact.get("similar_cases") or [], PLAN_CASE_LIMIT_AI)
     compact["similar_case_summaries"] = [_truncate(item, 240) for item in (compact.get("similar_case_summaries") or [])[:PLAN_CASE_LIMIT_AI]]
     compact["structured_corrections"] = _compact_knowledge_items(compact.get("structured_corrections") or [], PLAN_CORRECTION_LIMIT_AI)
+    _replace_plan_knowledge_with_counts(compact)
     compact["pending_confirmations"] = [_truncate(item, 220) for item in (compact.get("pending_confirmations") or [])[:12]]
     compact["missing_information"] = [_truncate(item, 180) for item in (compact.get("missing_information") or [])[:8]]
     compact["required_fields"] = _compact_required_fields(compact.get("required_fields") or {})
@@ -268,6 +271,20 @@ def compact_config_plan_for_ai(plan: dict[str, Any]) -> dict[str, Any]:
         "headers": (planning_signals.get("headers") or [])[:40],
     }
     return _drop_empty(compact)
+
+
+def _replace_plan_knowledge_with_counts(plan: dict[str, Any]) -> None:
+    for key in [
+        "matched_field_mappings",
+        "field_dictionary_matches",
+        "matched_rules",
+        "similar_cases",
+        "similar_case_summaries",
+        "structured_corrections",
+    ]:
+        value = plan.pop(key, None)
+        if value:
+            plan[f"{key}_count"] = len(value)
 
 
 def compact_target_table_profiles(profiles: dict[str, Any]) -> dict[str, Any]:
@@ -358,17 +375,17 @@ def _relationship_priority(relation: dict[str, Any], targets: set[str], recommen
 
 def _compact_top_level_knowledge(context: dict[str, Any]) -> None:
     limits = {
-        "matched_field_mappings": 20,
-        "field_dictionary_matches": 24,
-        "matched_rules": 8,
-        "similar_cases": 4,
-        "structured_corrections": 6,
+        "matched_field_mappings": 6,
+        "field_dictionary_matches": 8,
+        "matched_rules": 5,
+        "similar_cases": 2,
+        "structured_corrections": 2,
     }
     for key, limit in limits.items():
         if key in context:
             context[key] = _compact_knowledge_items(context.get(key) or [], limit)
     if "similar_case_summaries" in context:
-        context["similar_case_summaries"] = [_truncate(item, 240) for item in (context.get("similar_case_summaries") or [])[:4]]
+        context["similar_case_summaries"] = [_truncate_deep(item, 160) for item in (context.get("similar_case_summaries") or [])[:2]]
 
 
 def _compact_knowledge_items(items: list[Any], limit: int) -> list[Any]:
@@ -415,17 +432,16 @@ def _compact_workbooks_for_ai(workbooks: list[dict[str, Any]]) -> list[dict[str,
         is_value = _is_value_workbook(workbook)
         sheets = []
         for sheet in workbook.get("sheets") or []:
-            sample_rows = [] if is_value else _compact_planning_rows(sheet.get("sample_rows") or [], limit=200)
             sheets.append(
                 {
                     "name": sheet.get("name"),
                     "max_row": sheet.get("max_row"),
                     "max_column": sheet.get("max_column"),
                     "header_row": sheet.get("header_row"),
-                    "headers": (sheet.get("headers") or [])[:80],
+                    "headers": (sheet.get("headers") or [])[:50],
                     "sample_row_count": sheet.get("sample_row_count"),
-                    "sample_rows_omitted": max(0, (sheet.get("sample_row_count") or 0) - len(sample_rows)),
-                    "sample_rows": sample_rows,
+                    "sample_rows_omitted": sheet.get("sample_row_count") or 0,
+                    "sample_rows": [],
                     "context_note": "价值表已转为本地索引，AI 不接收全量行。" if is_value else "规划表只保留与配表相关的非空字段。",
                 }
             )
@@ -448,7 +464,7 @@ def _build_planning_evidence(workbooks: list[dict[str, Any]]) -> list[dict[str, 
         if _is_value_workbook(workbook):
             continue
         for sheet in workbook.get("sheets") or []:
-            rows = _compact_planning_rows(sheet.get("sample_rows") or [], limit=200)
+            rows = _compact_planning_rows(sheet.get("sample_rows") or [], limit=80)
             evidence.append(
                 {
                     "source_id": workbook.get("source_id"),
@@ -505,22 +521,50 @@ def _value_table_summary(context: dict[str, Any]) -> dict[str, Any]:
 
 def _resolved_items(context: dict[str, Any]) -> list[dict[str, Any]]:
     resolution = context.get("planning_item_resolution") or {}
-    return (resolution.get("matches") or [])[:120]
+    return [_compact_resolved_item(item) for item in (resolution.get("matches") or [])[:48]]
 
 
 def _unresolved_item_candidates(context: dict[str, Any]) -> list[dict[str, Any]]:
     resolution = context.get("planning_item_resolution") or {}
     result = []
-    for item in (resolution.get("missing") or [])[:80]:
+    for item in (resolution.get("missing") or [])[:24]:
         result.append(
             {
                 "product_name": item.get("product_name"),
                 "planning_ref": item.get("planning_ref"),
                 "reason": item.get("reason"),
-                "candidates": (item.get("candidates") or [])[:5],
+                "candidates": (item.get("candidates") or [])[:3],
             }
         )
     return result
+
+
+def _planning_resolution_summary(context: dict[str, Any]) -> dict[str, Any]:
+    resolution = context.get("planning_item_resolution") or {}
+    return _drop_empty(
+        {
+            "enabled": resolution.get("enabled"),
+            "summary": resolution.get("summary") or {},
+            "warnings": (resolution.get("warnings") or [])[:5],
+            "column_mappings": (resolution.get("column_mappings") or [])[:6],
+            "notes": "Full item matches, duplicate candidates, and raw value rows stay in local run files; AI receives compact resolved_items only.",
+        }
+    )
+
+
+def _compact_resolved_item(item: dict[str, Any]) -> dict[str, Any]:
+    return _drop_empty(
+        {
+            "product_name": item.get("product_name"),
+            "reward_type": item.get("reward_type"),
+            "content_id": item.get("content_id"),
+            "num": item.get("num"),
+            "confidence": item.get("confidence"),
+            "needs_confirmation": item.get("needs_confirmation"),
+            "planning_ref": item.get("planning_ref"),
+            "value_ref": item.get("value_ref"),
+        }
+    )
 
 
 def _keep_profile_field(field: str, stat: dict[str, Any], profile: dict[str, Any]) -> bool:
