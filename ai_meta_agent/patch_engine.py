@@ -119,6 +119,21 @@ def _open_states(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_di
     return states
 
 
+def _assert_overwrite_targets_writable(states: dict[str, WorkbookState]) -> None:
+    locked: list[str] = []
+    for state in states.values():
+        if not state.source_path.exists():
+            continue
+        try:
+            with state.source_path.open("r+b"):
+                pass
+        except OSError as exc:
+            locked.append(f"{state.source_path} ({exc})")
+    if locked:
+        joined = "\n".join(f"- {item}" for item in locked)
+        raise PermissionError(f"原表暂时无法写入，请先关闭 Excel 或解除文件占用后重试：\n{joined}")
+
+
 def _normalize_key(row: dict[str, Any], primary_key: list[str]) -> tuple[Any, ...]:
     return tuple(row.get(field) for field in primary_key)
 
@@ -208,6 +223,8 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
     if write_mode not in {"preview", "overwrite"}:
         raise ValueError("write_mode must be preview or overwrite")
     states = _open_states(manifest, schema, patch, base_dir, run_dir)
+    if write_mode == "overwrite":
+        _assert_overwrite_targets_writable(states)
     rollback_ops: list[PatchOperation] = []
     operation_results: list[dict[str, Any]] = []
     touched_tables_by_file: dict[str, set[str]] = {}

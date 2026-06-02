@@ -240,6 +240,7 @@ function stepPaths(parsed) {
       patch: parsed.patch,
       result: parsed.result,
       configuration_record: parsed.configuration_record,
+      run_error: parsed.run_error,
       case_review: parsed.case_review,
       structured_correction: parsed.structured_correction
     }).filter(([, value]) => Boolean(value))
@@ -279,6 +280,8 @@ function stepSummary(step, artifact = {}, parsed = {}) {
     const result = artifact.result || {};
     return {
       write_mode: result.write_mode || parsed.write_mode || "",
+      error: artifact.runError?.error || parsed.error || "",
+      error_type: artifact.runError?.error_type || "",
       operation_count: result.operation_results?.length || 0,
       preview_count: Object.keys(result.previews || {}).length,
       written_count: Object.keys(result.written_files || {}).length,
@@ -334,7 +337,8 @@ function stepData(step, artifact = {}, parsed = {}) {
       configurationRecord: artifact.configurationRecord || null,
       diff: compactDiff(artifact.diff || {}),
       validation: artifact.validation || null,
-      rollback: artifact.rollback || null
+      rollback: artifact.rollback || null,
+      runError: artifact.runError || null
     };
   }
   if (step === "caseReview") {

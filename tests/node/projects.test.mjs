@@ -90,3 +90,28 @@ test("workflow run records latest step data and keeps history", () => {
   assert.deepEqual(recorded.inputs.target_tables, ["activity"]);
   assert.equal(recorded.history[0].step, "draft");
 });
+
+test("failed apply run keeps error details in the project record", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-meta-agent-project-apply-error-"));
+  const project = createProject(dir, { name: "apply error sample" });
+  const runDir = path.join(dir, ".runs", "projects", project.project_id, "runs", "apply-20260602T010000Z");
+  const errorPath = path.join(runDir, "run-error.json");
+  fs.mkdirSync(runDir, { recursive: true });
+  const runError = { error_type: "PermissionError", error: "原表暂时无法写入" };
+  fs.writeFileSync(errorPath, JSON.stringify(runError), "utf8");
+
+  const recorded = recordWorkflowRun(dir, project.project_id, "applyOverwrite", {
+    result: {
+      status: 1,
+      stdout: JSON.stringify({ run_dir: runDir, run_error: errorPath, write_mode: "overwrite" })
+    },
+    artifact: { runError },
+    payload: { manifest: { target_tables: ["activity"] } }
+  });
+
+  assert.equal(recorded.steps.applyOverwrite.status, 1);
+  assert.equal(recorded.steps.applyOverwrite.summary.error_type, "PermissionError");
+  assert.equal(recorded.steps.applyOverwrite.summary.error, "原表暂时无法写入");
+  assert.equal(recorded.steps.applyOverwrite.data.runError.error_type, "PermissionError");
+  assert.equal(recorded.steps.applyOverwrite.paths.run_error, errorPath);
+});

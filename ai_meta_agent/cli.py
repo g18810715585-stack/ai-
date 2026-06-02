@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -679,33 +680,56 @@ def cmd_apply(args: argparse.Namespace) -> int:
     if not patch_path.is_absolute():
         patch_path = base_dir / patch_path
     manifest = _load_manifest(manifest_path)
-    schema = load_schema(_schema_path(base_dir, manifest))
-    schema = _targeted_schema(schema, manifest)
-    manifest, _ = discover_config_tables(manifest, schema, base_dir)
-    patch = Patch.model_validate(read_json(patch_path))
     run_dir = make_run_dir(_run_root(base_dir, manifest), "apply")
-    result = apply_patch(manifest, schema, patch, base_dir, run_dir, write_mode=args.write_mode)
-    record = build_configuration_record(manifest, patch, result, run_dir)
-    result["configuration_record"] = record
-    result["configuration_record_paths"] = persist_configuration_record(base_dir, record, run_dir)
-    write_json(run_dir / "apply-result.json", result)
-    write_json(run_dir / "diff.json", result["diff"])
-    write_json(run_dir / "validation.json", result["validation"])
-    write_json(run_dir / "rollback-patch.json", result["rollback_patch"])
-    write_text(run_dir / "apply-result.md", _apply_markdown(result))
-    print(
-        json.dumps(
-            {
-                "run_dir": str(run_dir),
-                "result": str(run_dir / "apply-result.json"),
-                "configuration_record": str(run_dir / "configuration-record.json"),
-                "write_mode": args.write_mode,
-            },
-            ensure_ascii=False,
-            indent=2,
+    try:
+        schema = load_schema(_schema_path(base_dir, manifest))
+        schema = _targeted_schema(schema, manifest)
+        manifest, _ = discover_config_tables(manifest, schema, base_dir)
+        patch = Patch.model_validate(read_json(patch_path))
+        result = apply_patch(manifest, schema, patch, base_dir, run_dir, write_mode=args.write_mode)
+        record = build_configuration_record(manifest, patch, result, run_dir)
+        result["configuration_record"] = record
+        result["configuration_record_paths"] = persist_configuration_record(base_dir, record, run_dir)
+        write_json(run_dir / "apply-result.json", result)
+        write_json(run_dir / "diff.json", result["diff"])
+        write_json(run_dir / "validation.json", result["validation"])
+        write_json(run_dir / "rollback-patch.json", result["rollback_patch"])
+        write_text(run_dir / "apply-result.md", _apply_markdown(result))
+        print(
+            json.dumps(
+                {
+                    "run_dir": str(run_dir),
+                    "result": str(run_dir / "apply-result.json"),
+                    "configuration_record": str(run_dir / "configuration-record.json"),
+                    "write_mode": args.write_mode,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
         )
-    )
-    return 0
+        return 0
+    except Exception as exc:  # noqa: BLE001 - surfaced to the local panel with run artifacts.
+        error_payload = {
+            "command": "apply",
+            "write_mode": args.write_mode,
+            "error_type": exc.__class__.__name__,
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+        write_json(run_dir / "run-error.json", error_payload)
+        print(
+            json.dumps(
+                {
+                    "run_dir": str(run_dir),
+                    "run_error": str(run_dir / "run-error.json"),
+                    "write_mode": args.write_mode,
+                    "error": str(exc),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 1
 
 
 def cmd_case_review(args: argparse.Namespace) -> int:

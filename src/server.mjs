@@ -417,6 +417,7 @@ function collectArtifact(result) {
   if (parsed.configuration_record) artifact.configurationRecord = maybeReadJson(parsed.configuration_record);
   if (parsed.case_review) artifact.caseReview = maybeReadJson(parsed.case_review);
   if (parsed.structured_correction) artifact.structuredCorrection = maybeReadJson(parsed.structured_correction);
+  if (parsed.run_error) artifact.runError = maybeReadJson(parsed.run_error);
   if (parsed.relationship_map) artifact.relationshipMap = maybeReadJson(parsed.relationship_map);
   if (parsed.planning_item_resolution) artifact.planningItemResolution = maybeReadJson(parsed.planning_item_resolution);
   if (parsed.context_budget) artifact.contextBudget = maybeReadJson(parsed.context_budget);
@@ -435,6 +436,7 @@ function collectArtifact(result) {
     artifact.draftDiagnostics = artifact.draftDiagnostics || maybeReadJson(path.join(parsed.run_dir, "draft-diagnostics.json"));
     artifact.draftTablePreview = artifact.draftTablePreview || maybeReadJson(path.join(parsed.run_dir, "draft-table-preview.json"));
     artifact.configurationRecord = artifact.configurationRecord || maybeReadJson(path.join(parsed.run_dir, "configuration-record.json"));
+    artifact.runError = artifact.runError || maybeReadJson(path.join(parsed.run_dir, "run-error.json"));
     artifact.caseReview = artifact.caseReview || maybeReadJson(path.join(parsed.run_dir, "case-review.json"));
     artifact.structuredCorrection = artifact.structuredCorrection || maybeReadJson(path.join(parsed.run_dir, "structured-correction.json"));
     artifact.diff = maybeReadJson(path.join(parsed.run_dir, "diff.json"));
