@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import shutil
+from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font
 
 from .models import Manifest, Patch, PatchOperation, SchemaBundle, ValidationIssue, ValidationReport
 
@@ -15,6 +17,13 @@ class WorkbookState:
     source_path: Path
     preview_path: Path
     workbook: Workbook
+
+
+@dataclass
+class ColumnStyle:
+    font_name: str | None = None
+    font_size: float | None = None
+    alignment: Any | None = None
 
 
 HEADER_SCAN_ROWS = 3
@@ -106,7 +115,13 @@ def _find_rows(sheet: Any, match: dict[str, Any], index: dict[str, int] | None =
     return rows
 
 
-def _write_row(sheet: Any, row_idx: int, row: dict[str, Any], index: dict[str, int] | None = None) -> dict[str, int]:
+def _write_row(
+    sheet: Any,
+    row_idx: int,
+    row: dict[str, Any],
+    index: dict[str, int] | None = None,
+    style_profile: dict[int, ColumnStyle] | None = None,
+) -> dict[str, int]:
     current_index = index if index is not None else _header_index(sheet)
     next_col = max(current_index.values(), default=0) + 1
     header_row = _field_header_row(sheet)
@@ -115,8 +130,78 @@ def _write_row(sheet: Any, row_idx: int, row: dict[str, Any], index: dict[str, i
             sheet.cell(header_row, next_col).value = field
             current_index[field] = next_col
             next_col += 1
-        sheet.cell(row_idx, current_index[field]).value = value
+        column = current_index[field]
+        cell = sheet.cell(row_idx, column)
+        cell.value = value
+        if style_profile:
+            _apply_column_style(cell, style_profile.get(column))
     return current_index
+
+
+def _column_style_profile(sheet: Any, index: dict[str, int]) -> dict[int, ColumnStyle]:
+    columns = sorted(set(index.values()))
+    data_start = max(_header_rows(sheet), default=1) + 1
+    profiles: dict[int, ColumnStyle] = {}
+    for column in columns:
+        font_votes: dict[tuple[Any, ...], dict[str, Any]] = {}
+        alignment_votes: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for row_idx in range(data_start, sheet.max_row + 1):
+            cell = sheet.cell(row_idx, column)
+            if cell.value in (None, ""):
+                continue
+            _vote_style(font_votes, _font_key(cell.font), cell.font, row_idx)
+            _vote_style(alignment_votes, _alignment_key(cell.alignment), cell.alignment, row_idx)
+        font = _winning_style(font_votes)
+        alignment = _winning_style(alignment_votes)
+        if font or alignment:
+            profiles[column] = ColumnStyle(
+                font_name=getattr(font, "name", None) if font else None,
+                font_size=getattr(font, "sz", None) if font else None,
+                alignment=copy(alignment) if alignment else None,
+            )
+    return profiles
+
+
+def _vote_style(votes: dict[tuple[Any, ...], dict[str, Any]], key: tuple[Any, ...] | None, style: Any, row_idx: int) -> None:
+    if not key:
+        return
+    vote = votes.setdefault(key, {"count": 0, "first_row": row_idx, "style": copy(style)})
+    vote["count"] += 1
+
+
+def _winning_style(votes: dict[tuple[Any, ...], dict[str, Any]]) -> Any | None:
+    if not votes:
+        return None
+    return max(votes.values(), key=lambda item: (item["count"], -item["first_row"]))["style"]
+
+
+def _font_key(font: Any) -> tuple[Any, ...] | None:
+    name = getattr(font, "name", None)
+    size = getattr(font, "sz", None)
+    if name is None and size is None:
+        return None
+    return (name, size)
+
+
+def _alignment_key(alignment: Any) -> tuple[Any, ...] | None:
+    key = (
+        getattr(alignment, "horizontal", None),
+        getattr(alignment, "vertical", None),
+        getattr(alignment, "wrap_text", None),
+        getattr(alignment, "text_rotation", None),
+        getattr(alignment, "shrink_to_fit", None),
+        getattr(alignment, "indent", None),
+    )
+    return key if any(value is not None for value in key) else None
+
+
+def _apply_column_style(cell: Any, style: ColumnStyle | None) -> None:
+    if not style:
+        return
+    if style.font_name is not None or style.font_size is not None:
+        cell.font = Font(name=style.font_name, sz=style.font_size)
+    if style.alignment is not None:
+        cell.alignment = copy(style.alignment)
 
 
 def _table_ref(manifest: Manifest, schema: SchemaBundle, table_name: str, base_dir: Path) -> tuple[Path, str]:
@@ -268,6 +353,7 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
         state = states[file_key]
         sheet = _ensure_sheet(state.workbook, sheet_name, list(table.fields.keys()))
         index = _header_index(sheet)
+        style_profile = _column_style_profile(sheet, index) if operation.op in {"insert", "replace_group"} else {}
         table_diff = _table_diff(diffs, file_key, sheet_name)
         _track_table(touched_tables_by_file, file_key, operation.target_table)
         _track_row(touched_rows_by_file, file_key, operation.target_table)
@@ -312,7 +398,7 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
         elif operation.op == "insert":
             for row in operation.rows:
                 row_idx = sheet.max_row + 1
-                _write_row(sheet, row_idx, row, index)
+                _write_row(sheet, row_idx, row, index, style_profile)
                 inserted = _row_dict(sheet, row_idx, index)
                 table_diff["inserted"].append(inserted)
                 _track_row(touched_rows_by_file, file_key, operation.target_table, row_idx)
@@ -361,7 +447,7 @@ def apply_patch(manifest: Manifest, schema: SchemaBundle, patch: Patch, base_dir
                 sheet.delete_rows(row_idx, 1)
             for row in operation.rows:
                 row_idx = sheet.max_row + 1
-                _write_row(sheet, row_idx, row, index)
+                _write_row(sheet, row_idx, row, index, style_profile)
                 inserted = _row_dict(sheet, row_idx, index)
                 table_diff["inserted"].append(inserted)
                 _track_row(touched_rows_by_file, file_key, operation.target_table, row_idx)

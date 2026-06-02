@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
-from openpyxl.styles import PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from ai_meta_agent.ai_context import build_minimal_context
 from ai_meta_agent.cli import _auto_expand_generation_tables, analyze_manifest
@@ -268,6 +268,86 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(preview_sheet.cell(4, 11).value, 999)
             self.assertEqual(preview_sheet.cell(4, 12).value, "10001")
             self.assertEqual(preview_sheet.cell(4, 13).value, "3")
+
+    def test_inserted_rows_inherit_column_font_size_and_alignment_without_grid_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            styled = tmp / "styled.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "styled"
+            sheet.sheet_view.showGridLines = False
+            sheet.append(["编号", "名称"])
+            sheet.append(["id", "name"])
+            sheet.append(["int", "string"])
+            thin = Side(style="thin", color="FF000000")
+            existing_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+            for row_idx in range(4, 7):
+                sheet.cell(row_idx, 1).value = row_idx - 3
+                sheet.cell(row_idx, 1).font = Font(name="Arial", sz=9)
+                sheet.cell(row_idx, 1).alignment = Alignment(horizontal="center", vertical="center")
+                sheet.cell(row_idx, 1).border = existing_border
+                sheet.cell(row_idx, 2).value = f"item-{row_idx}"
+                sheet.cell(row_idx, 2).font = Font(name="Calibri", sz=11)
+                sheet.cell(row_idx, 2).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+                sheet.cell(row_idx, 2).border = existing_border
+            sheet.cell(6, 1).font = Font(name="Times New Roman", sz=12)
+            workbook.save(styled)
+
+            manifest = Manifest.model_validate(
+                {
+                    "project": "style-test",
+                    "mode": "supervised_write",
+                    "schema_path": "",
+                    "planning_sources": [],
+                    "config_tables": {"styled": {"path": str(styled), "sheet": "styled"}},
+                }
+            )
+            schema = SchemaBundle.model_validate(
+                {
+                    "version": 1,
+                    "tables": {
+                        "styled": {
+                            "sheet": "styled",
+                            "primary_key": ["id"],
+                            "fields": {"id": {"type": "int"}, "name": {"type": "str"}},
+                        }
+                    },
+                }
+            )
+            patch_obj = Patch.model_validate(
+                {
+                    "patch_id": "style-insert",
+                    "project": "style-test",
+                    "operations": [
+                        {
+                            "op": "insert",
+                            "target_table": "styled",
+                            "rows": [{"id": 4, "name": "new item"}],
+                            "reason": "unit test",
+                            "confidence": 1,
+                        }
+                    ],
+                }
+            )
+
+            apply_dir = tmp / ".runs" / "apply-style"
+            result = apply_patch(manifest, schema, patch_obj, tmp, apply_dir)
+            preview = Path(next(iter(result["previews"].values())))
+            preview_sheet = load_workbook(preview)["styled"]
+            id_cell = preview_sheet.cell(7, 1)
+            name_cell = preview_sheet.cell(7, 2)
+            self.assertFalse(preview_sheet.sheet_view.showGridLines)
+            self.assertEqual(id_cell.font.name, "Arial")
+            self.assertEqual(id_cell.font.sz, 9)
+            self.assertEqual(id_cell.alignment.horizontal, "center")
+            self.assertEqual(id_cell.alignment.vertical, "center")
+            self.assertEqual(name_cell.font.name, "Calibri")
+            self.assertEqual(name_cell.font.sz, 11)
+            self.assertEqual(name_cell.alignment.horizontal, "left")
+            self.assertTrue(name_cell.alignment.wrap_text)
+            self.assertEqual(preview_sheet.cell(4, 1).border.left.style, "thin")
+            self.assertIsNone(id_cell.border.left.style)
 
     def test_habit_learning_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
