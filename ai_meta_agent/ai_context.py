@@ -247,6 +247,7 @@ def build_minimal_context(
             "Use target_table_profiles as the current original-table state: next_values are based on the bottom-most existing data row for generated primary keys/group keys, enum_values for valid existing options, tail_rows for recent writing style, and lookup fields only as reference evidence.",
             "For activity.id, target_table_profiles may use the last regular activity ID before the high-value season/cross-server ID region; follow next_value_basis instead of max_numeric.",
             "If a needed generated ID/group has no target_table_profiles baseline, return a placeholder plus a pending confirmation instead of inventing a number.",
+            "Keep patch output minimal: include only fields that should be written, never echo full original rows, and omit null, blank, unchanged, or placeholder fields.",
         ],
         "schema": {
             "tables": {

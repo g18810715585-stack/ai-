@@ -88,6 +88,10 @@ PLAN_RULE_LIMIT_AI = 4
 PLAN_CASE_LIMIT_AI = 2
 PLAN_CORRECTION_LIMIT_AI = 3
 KNOWLEDGE_STRING_LIMIT_AI = 160
+FAST_CONTEXT_MAX_BYTES = 64 * 1024
+FAST_SCHEMA_FIELD_LIMIT_AI = 28
+FAST_PROFILE_FIELD_LIMIT_AI = 4
+FAST_RELATIONSHIP_LIMIT_AI = 10
 
 
 def optimize_context_for_ai(context: dict[str, Any]) -> dict[str, Any]:
@@ -124,7 +128,7 @@ def optimize_context_for_ai(context: dict[str, Any]) -> dict[str, Any]:
             "确定性 ID 修正继续使用本地完整 target_table_profiles。",
         ],
     }
-    return optimized
+    return enforce_fast_context_budget(optimized)
 
 
 def compact_schema_for_ai(schema: dict[str, Any]) -> dict[str, Any]:
@@ -321,6 +325,158 @@ def compact_target_table_profiles(profiles: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def enforce_fast_context_budget(context: dict[str, Any]) -> dict[str, Any]:
+    if _json_bytes(context) <= FAST_CONTEXT_MAX_BYTES:
+        return context
+    compact = deepcopy(context)
+    targets = set(compact.get("target_tables") or [])
+    compact["schema"] = _fast_schema_for_ai(compact.get("schema") or {}, targets)
+    compact["target_table_profiles"] = _fast_target_table_profiles(compact.get("target_table_profiles") or {}, targets)
+    compact["relationship_map"] = _fast_relationship_map(compact.get("relationship_map") or {})
+    compact["planning_evidence"] = _fast_planning_evidence(compact.get("planning_evidence") or [])
+    compact["matched_field_mappings"] = _compact_knowledge_items(compact.get("matched_field_mappings") or [], 4)
+    compact["field_dictionary_matches"] = _compact_knowledge_items(compact.get("field_dictionary_matches") or [], 5)
+    compact["matched_rules"] = _compact_knowledge_items(compact.get("matched_rules") or [], 3)
+    compact["structured_corrections"] = _compact_knowledge_items(compact.get("structured_corrections") or [], 2)
+    compact["similar_cases"] = _compact_knowledge_items(compact.get("similar_cases") or [], 1)
+    compact["similar_case_summaries"] = [_truncate_deep(item, 120) for item in (compact.get("similar_case_summaries") or [])[:1]]
+    optimization = compact.setdefault("context_optimization", {})
+    optimization["mode"] = "fast_budget_local_evidence_first"
+    optimization["max_context_bytes"] = FAST_CONTEXT_MAX_BYTES
+    optimization.setdefault("notes", []).append("上下文超过快速预算时，只发送关键写表字段和 ID 依据；完整表画像仍保存在本地用于确定性后处理。")
+    return compact
+
+
+def _fast_schema_for_ai(schema: dict[str, Any], targets: set[str]) -> dict[str, Any]:
+    tables: dict[str, Any] = {}
+    for table_name, table in (schema.get("tables") or {}).items():
+        if targets and table_name not in targets:
+            continue
+        fields = _priority_fields(table.get("field_names") or [], table, FAST_SCHEMA_FIELD_LIMIT_AI)
+        required = [field for field in (table.get("required_fields") or []) if field in fields]
+        compact = {
+            "primary_key": table.get("primary_key") or [],
+            "group_key": table.get("group_key"),
+            "ai_write_permission": table.get("ai_write_permission"),
+            "field_names": fields,
+            "required_fields": required[:12],
+            "preserve_fields": [field for field in (table.get("preserve_fields") or []) if field in fields],
+            "block_update_fields": [field for field in (table.get("block_update_fields") or []) if field in fields],
+        }
+        for key in ["field_types", "default_values"]:
+            values = table.get(key) or {}
+            if isinstance(values, dict):
+                selected = {field: values[field] for field in fields if field in values}
+                if selected:
+                    compact[key] = selected
+        tables[table_name] = _drop_empty(compact)
+    return {"tables": tables, "risk": schema.get("risk") or {}}
+
+
+def _priority_fields(fields: list[str], table: dict[str, Any], limit: int) -> list[str]:
+    required = table.get("required_fields") or []
+    anchors = [*(table.get("primary_key") or []), table.get("group_key"), *required]
+    selected: list[str] = []
+    seen: set[str] = set()
+    for field in anchors:
+        if field and field in fields and field not in seen:
+            seen.add(field)
+            selected.append(field)
+    candidates = [field for field in fields if field not in seen]
+    candidates.sort(key=lambda field: (-_field_name_priority(field), fields.index(field)))
+    for field in candidates:
+        if len(selected) >= limit:
+            break
+        seen.add(field)
+        selected.append(field)
+    return selected
+
+
+def _field_name_priority(field: str) -> int:
+    text = str(field)
+    score = 0
+    for keyword in PROFILE_PRIORITY_KEYWORDS:
+        if keyword in text or keyword in text.lower():
+            score += 10
+    if any(value in text.lower() for value in ("id", "type", "group", "reward", "goods", "cost", "price", "order", "time", "form", "list")):
+        score += 20
+    return score
+
+
+def _fast_target_table_profiles(profiles: dict[str, Any], targets: set[str]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for table_name, profile in profiles.items():
+        if targets and table_name not in targets:
+            continue
+        fields = {}
+        candidates = []
+        for order, (field, stat) in enumerate((profile.get("fields") or {}).items()):
+            if not isinstance(stat, dict):
+                continue
+            candidates.append((_profile_field_priority(field, stat, profile), order, field, stat))
+        candidates.sort(key=lambda item: (-item[0], item[1]))
+        for _, _, field, stat in candidates[:FAST_PROFILE_FIELD_LIMIT_AI]:
+            fields[field] = _fast_profile_field(stat)
+        result[table_name] = _drop_empty(
+            {
+                "primary_key": profile.get("primary_key") or [],
+                "group_key": profile.get("group_key"),
+                "next_values": profile.get("next_values") or {},
+                "generation_summary": profile.get("generation_summary") or {},
+                "fields": fields,
+            }
+        )
+    return result
+
+
+def _fast_profile_field(stat: dict[str, Any]) -> dict[str, Any]:
+    keys = [
+        "field",
+        "roles",
+        "allocation_role",
+        "id_strategy",
+        "reference_table",
+        "reference_field",
+        "next_value",
+        "next_value_basis",
+        "bottom_last_value",
+        "bottom_last_value_row",
+        "activity_regular_last_numeric",
+        "activity_regular_last_numeric_row",
+        "enum_values",
+    ]
+    compact = {key: stat.get(key) for key in keys if stat.get(key) not in (None, "", [])}
+    if "enum_values" in compact:
+        compact["enum_values"] = compact["enum_values"][:3]
+    return compact
+
+
+def _fast_relationship_map(result: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(result)
+    compact["relations"] = (result.get("relations") or [])[:FAST_RELATIONSHIP_LIMIT_AI]
+    if "ai_review" in compact:
+        compact.pop("ai_review", None)
+    return _drop_empty(compact)
+
+
+def _fast_planning_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact_items = []
+    for item in items[:2]:
+        rows = []
+        for row in (item.get("rows") or [])[:48]:
+            rows.append({key: _truncate(value, 120) for key, value in row.items()})
+        compact_items.append(
+            {
+                "source_id": item.get("source_id"),
+                "sheet": item.get("sheet"),
+                "header_row": item.get("header_row"),
+                "rows": rows,
+                "row_count": len(rows),
+            }
+        )
+    return compact_items
+
+
 def build_context_budget(original: dict[str, Any], optimized: dict[str, Any]) -> dict[str, Any]:
     original_bytes = _json_bytes(original)
     optimized_bytes = _json_bytes(optimized)
@@ -329,7 +485,7 @@ def build_context_budget(original: dict[str, Any], optimized: dict[str, Any]) ->
     planning_after = _planning_evidence_row_total(optimized.get("planning_evidence") or [])
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "mode": "deterministic_local_index_first",
+        "mode": (optimized.get("context_optimization") or {}).get("mode") or "deterministic_local_index_first",
         "original": {
             "bytes": original_bytes,
             "kb": round(original_bytes / 1024, 1),

@@ -12,7 +12,32 @@ REWARD_SLOT_FIELD = re.compile(r"^(type|reward|num|weight)_(\d+)$")
 def sanitize_patch(patch: Patch) -> dict[str, Any]:
     """Remove AI placeholder values that should not be written as real data."""
     return {
+        "blank_insert_fields": sanitize_blank_insert_fields(patch),
         "reward_unused_slots": sanitize_reward_unused_slots(patch),
+    }
+
+
+def sanitize_blank_insert_fields(patch: Patch) -> dict[str, Any]:
+    removed: list[dict[str, Any]] = []
+    for operation_index, operation in enumerate(patch.operations):
+        if operation.op not in {"insert", "replace_group"}:
+            continue
+        for row_index, row in enumerate(operation.rows):
+            for field in list(row.keys()):
+                value = row.get(field)
+                if _is_blank(value):
+                    removed.append(
+                        {
+                            "operation_index": operation_index,
+                            "row_index": row_index,
+                            "field": field,
+                            "reason": "blank insert field omitted so the writer only writes concrete values",
+                        }
+                    )
+                    row.pop(field, None)
+    return {
+        "removed_fields": len(removed),
+        "items": removed,
     }
 
 
@@ -84,3 +109,7 @@ def _is_zeroish(value: Any) -> bool:
         except ValueError:
             return False
     return False
+
+
+def _is_blank(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())

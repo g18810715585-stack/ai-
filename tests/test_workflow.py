@@ -511,6 +511,38 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(second_row["type_2"], 7)
         self.assertEqual(result["reward_unused_slots"]["removed_field_groups"], 2)
 
+    def test_blank_insert_fields_are_removed_but_update_blanks_remain(self) -> None:
+        patch_obj = Patch.model_validate(
+            {
+                "patch_id": "patch_blank_fields",
+                "project": "unit-sample",
+                "operations": [
+                    {
+                        "op": "insert",
+                        "target_table": "activity",
+                        "rows": [{"id": 1, "name": "activity", "empty": "", "unknown": None}],
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "ai returned blank insert fields",
+                        "confidence": 0.8,
+                    },
+                    {
+                        "op": "update",
+                        "target_table": "activity",
+                        "match": {"id": 1},
+                        "set": {"name": ""},
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "explicit clear remains reviewable",
+                        "confidence": 0.8,
+                    },
+                ],
+            }
+        )
+
+        result = sanitize_patch(patch_obj)
+        self.assertEqual(patch_obj.operations[0].rows[0], {"id": 1, "name": "activity"})
+        self.assertEqual(patch_obj.operations[1].set, {"name": ""})
+        self.assertEqual(result["blank_insert_fields"]["removed_fields"], 2)
+
     def test_teach_experience_writes_local_knowledge(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
