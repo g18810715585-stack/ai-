@@ -42,6 +42,7 @@ from ai_meta_agent.id_allocator import fill_active_shop_incremental_ids, fill_in
 from ai_meta_agent.io_utils import read_json, write_json
 from ai_meta_agent.item_resolution import resolve_planning_items
 from ai_meta_agent.models import Manifest, Patch, PlanningSource, SchemaBundle, SheetIR, SourceKind, WorkbookIR
+from ai_meta_agent.patch_sanitizer import sanitize_patch
 from ai_meta_agent.patch_engine import apply_patch
 from ai_meta_agent.relation_scanner import scan_relationships, split_reference_values
 from ai_meta_agent.schema import load_schema
@@ -382,6 +383,54 @@ class WorkflowTests(unittest.TestCase):
 
         self.assertEqual(patch_obj.operations[0].rows, [{"id": 5805, "name": "sample"}])
         self.assertEqual(patch_obj.operations[0].set, {})
+
+    def test_reward_unused_slots_are_removed_from_ai_patch(self) -> None:
+        patch_obj = Patch.model_validate(
+            {
+                "patch_id": "patch_reward_slots",
+                "project": "unit-sample",
+                "operations": [
+                    {
+                        "op": "insert",
+                        "target_table": "reward",
+                        "rows": [
+                            {
+                                "id": 605300001,
+                                "type_1": 7,
+                                "reward_1": 323,
+                                "num_1": 1,
+                                "type_2": 0,
+                                "reward_2": "0",
+                                "num_2": 0,
+                                "type_3": "",
+                                "reward_3": None,
+                                "num_3": "0",
+                            },
+                            {
+                                "id": 605300002,
+                                "type_1": 7,
+                                "reward_1": 324,
+                                "num_1": 1,
+                                "type_2": 7,
+                                "reward_2": 325,
+                                "num_2": 1,
+                            },
+                        ],
+                        "source_ref": {"workbook": "plan"},
+                        "reason": "ai filled unused reward slots with placeholders",
+                        "confidence": 0.75,
+                    }
+                ],
+            }
+        )
+
+        result = sanitize_patch(patch_obj)
+        first_row = patch_obj.operations[0].rows[0]
+        second_row = patch_obj.operations[0].rows[1]
+        self.assertNotIn("type_2", first_row)
+        self.assertNotIn("reward_3", first_row)
+        self.assertEqual(second_row["type_2"], 7)
+        self.assertEqual(result["reward_unused_slots"]["removed_field_groups"], 2)
 
     def test_teach_experience_writes_local_knowledge(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
