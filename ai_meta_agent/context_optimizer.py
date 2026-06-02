@@ -46,6 +46,48 @@ PROFILE_FIELD_KEYS = (
     "sample_values",
     "top_values",
 )
+PROFILE_FIELD_LIMIT_AI = 18
+PROFILE_TAIL_ROW_LIMIT_AI = 3
+PROFILE_SAMPLE_VALUE_LIMIT_AI = 3
+PROFILE_TOP_VALUE_LIMIT_AI = 3
+PROFILE_ENUM_VALUE_LIMIT_AI = 8
+PROFILE_PRIORITY_KEYWORDS = (
+    "id",
+    "ID",
+    "group",
+    "reward",
+    "goods",
+    "item",
+    "key",
+    "form",
+    "list",
+    "switch",
+    "cost",
+    "price",
+    "time",
+    "type",
+    "shop",
+    "活动",
+    "商品",
+    "奖励",
+    "道具",
+    "消耗",
+    "价格",
+    "限购",
+    "时间",
+    "类型",
+    "组",
+    "开关",
+    "排序",
+)
+SCHEMA_RELATIONSHIP_CANDIDATE_LIMIT_AI = 30
+RELATIONSHIP_LIMIT_AI = 28
+PLAN_FIELD_MAPPING_LIMIT_AI = 12
+PLAN_FIELD_DICTIONARY_LIMIT_AI = 16
+PLAN_RULE_LIMIT_AI = 6
+PLAN_CASE_LIMIT_AI = 3
+PLAN_CORRECTION_LIMIT_AI = 5
+KNOWLEDGE_STRING_LIMIT_AI = 320
 
 
 def optimize_context_for_ai(context: dict[str, Any]) -> dict[str, Any]:
@@ -61,6 +103,15 @@ def optimize_context_for_ai(context: dict[str, Any]) -> dict[str, Any]:
     optimized["value_table_summary"] = _value_table_summary(context)
     optimized["resolved_items"] = _resolved_items(context)
     optimized["unresolved_item_candidates"] = _unresolved_item_candidates(context)
+    if "schema" in optimized:
+        optimized["schema"] = compact_schema_for_ai(context.get("schema") or {})
+    if "relationship_map" in optimized:
+        optimized["relationship_map"] = compact_relationship_map_for_ai(context.get("relationship_map") or {})
+    if "config_discovery" in optimized:
+        optimized["config_discovery"] = compact_config_discovery_for_ai(context.get("config_discovery") or {})
+    if "config_plan" in optimized:
+        optimized["config_plan"] = compact_config_plan_for_ai(context.get("config_plan") or {})
+    _compact_top_level_knowledge(optimized)
     if "target_table_profiles" in optimized:
         optimized["target_table_profiles"] = compact_target_table_profiles(context.get("target_table_profiles") or {})
     optimized["context_optimization"] = {
@@ -74,17 +125,166 @@ def optimize_context_for_ai(context: dict[str, Any]) -> dict[str, Any]:
     return optimized
 
 
+def compact_schema_for_ai(schema: dict[str, Any]) -> dict[str, Any]:
+    tables: dict[str, Any] = {}
+    for table_name, table in (schema.get("tables") or {}).items():
+        if not isinstance(table, dict):
+            continue
+        fields = table.get("fields") or {}
+        field_names = list(fields.keys()) if isinstance(fields, dict) else []
+        required_fields: list[str] = []
+        typed_fields: dict[str, str] = {}
+        default_values: dict[str, Any] = {}
+        if isinstance(fields, dict):
+            for field, spec in fields.items():
+                if not isinstance(spec, dict):
+                    continue
+                if spec.get("required"):
+                    required_fields.append(field)
+                field_type = spec.get("type")
+                if field_type and field_type not in {"any", "str"}:
+                    typed_fields[field] = field_type
+                if spec.get("default") not in (None, "", []):
+                    default_values[field] = spec.get("default")
+        allow_update_fields = table.get("allow_update_fields") or []
+        allow_update_set = set(allow_update_fields)
+        field_name_set = set(field_names)
+        compact = {
+            "sheet": table.get("sheet"),
+            "primary_key": table.get("primary_key") or [],
+            "group_key": table.get("group_key"),
+            "overwrite_strategy": table.get("overwrite_strategy"),
+            "ai_write_permission": table.get("ai_write_permission"),
+            "preserve_fields": table.get("preserve_fields") or [],
+            "block_update_fields": table.get("block_update_fields") or [],
+            "field_names": field_names,
+        }
+        if allow_update_fields and allow_update_set != field_name_set:
+            compact["allow_update_fields"] = allow_update_fields
+        elif allow_update_fields:
+            compact["allow_update_policy"] = "all_field_names"
+        aliases = table.get("field_aliases") or {}
+        if aliases:
+            compact["field_aliases"] = dict(list(aliases.items())[:40])
+        if required_fields:
+            compact["required_fields"] = required_fields
+        if typed_fields:
+            compact["field_types"] = typed_fields
+        if default_values:
+            compact["default_values"] = default_values
+        tables[table_name] = {key: value for key, value in compact.items() if value not in (None, "", [], {})}
+    return {
+        "tables": tables,
+        "risk": schema.get("risk") or {},
+        "relationship_candidates": (schema.get("relationship_candidates") or [])[:SCHEMA_RELATIONSHIP_CANDIDATE_LIMIT_AI],
+    }
+
+
+def compact_relationship_map_for_ai(result: dict[str, Any]) -> dict[str, Any]:
+    targets = set(result.get("target_tables") or [])
+    recommended = set(result.get("recommended_tables") or [])
+    relations = []
+    raw_relations = list(result.get("relations") or [])
+    raw_relations.sort(key=lambda item: (-_relationship_priority(item, targets, recommended), item.get("from_table") or "", item.get("from_field") or ""))
+    for relation in raw_relations[:RELATIONSHIP_LIMIT_AI]:
+        evidence = relation.get("evidence") or {}
+        relations.append(
+            {
+                "from_table": relation.get("from_table"),
+                "from_field": relation.get("from_field"),
+                "to_table": relation.get("to_table"),
+                "to_field": relation.get("to_field"),
+                "relation_type": relation.get("relation_type"),
+                "confidence": relation.get("confidence"),
+                "risk": relation.get("risk"),
+                "hop": relation.get("hop"),
+                "evidence": {
+                    "hit_rate": evidence.get("hit_rate"),
+                    "hit_count": evidence.get("hit_count"),
+                    "sample_values": (evidence.get("sample_values") or evidence.get("matched_values") or [])[:3],
+                },
+            }
+        )
+    compact = {
+        "version": result.get("version"),
+        "target_tables": result.get("target_tables") or [],
+        "recommended_tables": result.get("recommended_tables") or [],
+        "summary": result.get("summary") or {},
+        "relations": relations,
+    }
+    omitted = max(0, len(raw_relations) - len(relations))
+    if omitted:
+        compact["omitted_relations"] = omitted
+    ai_review = result.get("ai_review") or {}
+    if ai_review:
+        compact["ai_review"] = {
+            "recommended_tables": (ai_review.get("recommended_tables") or [])[:12],
+            "notes": [_truncate(item, 220) for item in (ai_review.get("notes") or [])[:6]],
+            "risks": [_truncate(item, 220) for item in (ai_review.get("risks") or [])[:6]],
+            "pending_confirmations": [_truncate(item, 220) for item in (ai_review.get("pending_confirmations") or [])[:8]],
+        }
+    return compact
+
+
+def compact_config_discovery_for_ai(discovery: dict[str, Any]) -> dict[str, Any]:
+    targets = discovery.get("target_tables") or discovery.get("targets") or []
+    found = discovery.get("found_tables") or discovery.get("configured_tables") or discovery.get("tables") or {}
+    if isinstance(found, dict):
+        found_names = list(found.keys())
+    elif isinstance(found, list):
+        found_names = [item.get("name") if isinstance(item, dict) else item for item in found]
+    else:
+        found_names = []
+    missing = discovery.get("missing_target_tables") or discovery.get("missing_tables") or []
+    return {
+        "target_tables": targets,
+        "found_tables": [name for name in found_names if name][:80],
+        "missing_target_tables": missing[:40] if isinstance(missing, list) else missing,
+        "error_count": len(discovery.get("errors") or []),
+        "errors": [_truncate(item, 220) for item in (discovery.get("errors") or [])[:5]],
+    }
+
+
+def compact_config_plan_for_ai(plan: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(plan, dict):
+        return {}
+    compact = deepcopy(plan)
+    compact["run_instruction"] = _truncate(compact.get("run_instruction"), 900)
+    compact["recommended_target_tables"] = (compact.get("recommended_target_tables") or [])[:12]
+    compact["all_recommended_tables"] = (compact.get("all_recommended_tables") or [])[:18]
+    compact["relation_chain"] = (compact.get("relation_chain") or [])[:12]
+    compact["matched_field_mappings"] = _compact_knowledge_items(compact.get("matched_field_mappings") or [], PLAN_FIELD_MAPPING_LIMIT_AI)
+    compact["field_dictionary_matches"] = _compact_knowledge_items(compact.get("field_dictionary_matches") or [], PLAN_FIELD_DICTIONARY_LIMIT_AI)
+    compact["matched_rules"] = _compact_knowledge_items(compact.get("matched_rules") or [], PLAN_RULE_LIMIT_AI)
+    compact["similar_cases"] = _compact_knowledge_items(compact.get("similar_cases") or [], PLAN_CASE_LIMIT_AI)
+    compact["similar_case_summaries"] = [_truncate(item, 240) for item in (compact.get("similar_case_summaries") or [])[:PLAN_CASE_LIMIT_AI]]
+    compact["structured_corrections"] = _compact_knowledge_items(compact.get("structured_corrections") or [], PLAN_CORRECTION_LIMIT_AI)
+    compact["pending_confirmations"] = [_truncate(item, 220) for item in (compact.get("pending_confirmations") or [])[:12]]
+    compact["missing_information"] = [_truncate(item, 180) for item in (compact.get("missing_information") or [])[:8]]
+    compact["required_fields"] = _compact_required_fields(compact.get("required_fields") or {})
+    planning_signals = compact.get("planning_signals") or {}
+    compact["planning_signals"] = {
+        "sheet_names": (planning_signals.get("sheet_names") or [])[:8],
+        "headers": (planning_signals.get("headers") or [])[:40],
+    }
+    return _drop_empty(compact)
+
+
 def compact_target_table_profiles(profiles: dict[str, Any]) -> dict[str, Any]:
     compact: dict[str, Any] = {}
     for table_name, profile in profiles.items():
         if not isinstance(profile, dict):
             continue
-        fields = {}
-        for field, stat in (profile.get("fields") or {}).items():
+        fields: dict[str, Any] = {}
+        candidates = []
+        for order, (field, stat) in enumerate((profile.get("fields") or {}).items()):
             if not isinstance(stat, dict) or not _keep_profile_field(field, stat, profile):
                 continue
+            candidates.append((_profile_field_priority(field, stat, profile), order, field, stat))
+        candidates.sort(key=lambda item: (-item[0], item[1]))
+        for _, _, field, stat in candidates[:PROFILE_FIELD_LIMIT_AI]:
             fields[field] = _compact_profile_field(stat)
-        tail_rows = [_compact_tail_row(row, fields) for row in (profile.get("tail_rows") or [])[-5:]]
+        tail_rows = [_compact_tail_row(row, fields) for row in (profile.get("tail_rows") or [])[-PROFILE_TAIL_ROW_LIMIT_AI:]]
         compact[table_name] = {
             "sheet": profile.get("sheet"),
             "header_row": profile.get("header_row"),
@@ -96,6 +296,9 @@ def compact_target_table_profiles(profiles: dict[str, Any]) -> dict[str, Any]:
             "fields": fields,
             "tail_rows": [row for row in tail_rows if len(row) > 1],
         }
+        omitted = max(0, len(candidates) - len(fields))
+        if omitted:
+            compact[table_name]["omitted_profile_fields"] = omitted
         if profile.get("error"):
             compact[table_name]["error"] = profile.get("error")
     return compact
@@ -135,6 +338,75 @@ def build_context_budget(original: dict[str, Any], optimized: dict[str, Any]) ->
         },
         "item_resolution": (optimized.get("planning_item_resolution") or {}).get("summary") or {},
     }
+
+
+def _relationship_priority(relation: dict[str, Any], targets: set[str], recommended: set[str]) -> float:
+    from_table = relation.get("from_table")
+    to_table = relation.get("to_table")
+    confidence = float(relation.get("confidence") or 0)
+    score = confidence
+    if from_table in targets:
+        score += 0.35
+    if to_table in targets:
+        score += 0.25
+    if from_table in recommended or to_table in recommended:
+        score += 0.15
+    if int(relation.get("hop") or 1) <= 1:
+        score += 0.1
+    return score
+
+
+def _compact_top_level_knowledge(context: dict[str, Any]) -> None:
+    limits = {
+        "matched_field_mappings": 20,
+        "field_dictionary_matches": 24,
+        "matched_rules": 8,
+        "similar_cases": 4,
+        "structured_corrections": 6,
+    }
+    for key, limit in limits.items():
+        if key in context:
+            context[key] = _compact_knowledge_items(context.get(key) or [], limit)
+    if "similar_case_summaries" in context:
+        context["similar_case_summaries"] = [_truncate(item, 240) for item in (context.get("similar_case_summaries") or [])[:4]]
+
+
+def _compact_knowledge_items(items: list[Any], limit: int) -> list[Any]:
+    return [_truncate_deep(item) for item in items[:limit]]
+
+
+def _compact_required_fields(required_fields: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    if not isinstance(required_fields, dict):
+        return compact
+    for table_name, fields in required_fields.items():
+        if isinstance(fields, list):
+            compact[table_name] = fields[:18]
+        elif isinstance(fields, dict):
+            compact[table_name] = dict(list(fields.items())[:18])
+        else:
+            compact[table_name] = fields
+    return compact
+
+
+def _truncate_deep(value: Any, string_limit: int = KNOWLEDGE_STRING_LIMIT_AI) -> Any:
+    if isinstance(value, str):
+        return _truncate(value, string_limit)
+    if isinstance(value, list):
+        return [_truncate_deep(item, string_limit) for item in value[:20]]
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in {"raw", "raw_text", "original_text", "full_text", "content"}:
+                result[key] = _truncate(item, min(string_limit, 220))
+            else:
+                result[key] = _truncate_deep(item, string_limit)
+        return _drop_empty(result)
+    return value
+
+
+def _drop_empty(value: dict[str, Any]) -> dict[str, Any]:
+    return {key: item for key, item in value.items() if item not in (None, "", [], {})}
 
 
 def _compact_workbooks_for_ai(workbooks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -265,14 +537,47 @@ def _keep_profile_field(field: str, stat: dict[str, Any], profile: dict[str, Any
 
 
 def _compact_profile_field(stat: dict[str, Any]) -> dict[str, Any]:
-    compact = {key: stat.get(key) for key in PROFILE_FIELD_KEYS if key in stat and stat.get(key) not in (None, "", [])}
+    compact: dict[str, Any] = {}
+    roles = stat.get("roles") or []
+    important_values = bool(stat.get("allocation_role") or stat.get("id_strategy") or stat.get("reference_table") or "lookup_ref" in roles)
+    for key in PROFILE_FIELD_KEYS:
+        value = stat.get(key)
+        if value in (None, "", []):
+            continue
+        if key in {"sample_values", "top_values"} and not important_values:
+            continue
+        compact[key] = value
     if "sample_values" in compact:
-        compact["sample_values"] = compact["sample_values"][:5]
+        compact["sample_values"] = compact["sample_values"][:PROFILE_SAMPLE_VALUE_LIMIT_AI]
     if "top_values" in compact:
-        compact["top_values"] = compact["top_values"][:5]
+        compact["top_values"] = compact["top_values"][:PROFILE_TOP_VALUE_LIMIT_AI]
     if "enum_values" in compact:
-        compact["enum_values"] = compact["enum_values"][:12]
+        compact["enum_values"] = compact["enum_values"][:PROFILE_ENUM_VALUE_LIMIT_AI]
     return compact
+
+
+def _profile_field_priority(field: str, stat: dict[str, Any], profile: dict[str, Any]) -> int:
+    score = 0
+    roles = stat.get("roles") or []
+    if field in (profile.get("primary_key") or []):
+        score += 120
+    if field == profile.get("group_key"):
+        score += 110
+    if stat.get("allocation_role"):
+        score += 100
+    if stat.get("id_strategy") in {"new", "new_or_reuse"}:
+        score += 90
+    if stat.get("reference_table") or "lookup_ref" in roles:
+        score += 75
+    if "foreign_key_candidate" in roles:
+        score += 55
+    if any(keyword in field for keyword in PROFILE_PRIORITY_KEYWORDS) or any(keyword in field.lower() for keyword in PROFILE_PRIORITY_KEYWORDS):
+        score += 35
+    if stat.get("enum_values"):
+        score += 15
+    if stat.get("next_value") is not None:
+        score += 10
+    return score
 
 
 def _compact_tail_row(row: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:

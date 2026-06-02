@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import defaultdict
@@ -14,6 +15,8 @@ from .config_discovery import discover_config_tables
 from .io_utils import read_json, write_json, write_text
 from .models import ConfigTableRef, Manifest, SchemaBundle, TableSchema, resolve_path
 
+
+RELATIONSHIP_CACHE_VERSION = 1
 
 REFERENCE_WORDS = (
     "id",
@@ -632,6 +635,59 @@ def compact_relationship_context(result: dict[str, Any], limit: int = 45) -> dic
     }
 
 
+def _relationship_cache_path(
+    base_dir: Path,
+    refs: dict[str, ConfigTableRef],
+    schema: SchemaBundle,
+    root_targets: list[str],
+    index_table_names: list[str],
+    max_rows: int,
+) -> Path:
+    table_refs = []
+    for table_name in index_table_names:
+        ref = refs.get(table_name)
+        table = schema.tables.get(table_name)
+        if not ref or not table:
+            continue
+        path = resolve_path(base_dir, ref.path)
+        stat_info: dict[str, Any]
+        if path.exists():
+            stat = path.stat()
+            stat_info = {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}
+        else:
+            stat_info = {"missing": True}
+        table_refs.append(
+            {
+                "table": table_name,
+                "path": str(path.resolve()),
+                "sheet": ref.sheet or table.sheet or table_name,
+                "primary_key": table.primary_key,
+                "group_key": table.group_key,
+                "fields": list(table.fields.keys()),
+                **stat_info,
+            }
+        )
+    material = {
+        "version": RELATIONSHIP_CACHE_VERSION,
+        "max_rows": max_rows,
+        "root_targets": root_targets,
+        "index_tables": index_table_names,
+        "table_refs": table_refs,
+    }
+    digest = hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return base_dir / ".runs" / "cache" / "relationship-maps" / f"{digest}.json"
+
+
+def _read_relationship_cache(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        cached = read_json(path)
+    except Exception:  # noqa: BLE001 - stale cache files are ignored.
+        return None
+    return cached if isinstance(cached, dict) else None
+
+
 def scan_relationships(
     manifest: Manifest,
     schema: SchemaBundle,
@@ -664,6 +720,12 @@ def scan_relationships(
         for name in dict.fromkeys([*root_targets, *extra_index_names])
         if _is_config_table_name(name) and name in schema.tables and name in refs
     ]
+    cache_path = _relationship_cache_path(base_dir, refs, schema, root_targets, index_table_names, max_rows)
+    cached_result = _read_relationship_cache(cache_path)
+    if cached_result is not None:
+        write_json(run_dir / "relationship-map.json", cached_result)
+        write_text(run_dir / "relationship-map.md", _relation_markdown(cached_result))
+        return cached_result
 
     diagnostics: dict[str, Any] = {"errors": [], "missing_refs": [], "indexed_tables": [], "analyzed_tables": []}
     key_indexes: list[KeyIndex] = []
@@ -774,4 +836,6 @@ def scan_relationships(
     }
     write_json(run_dir / "relationship-map.json", result)
     write_text(run_dir / "relationship-map.md", _relation_markdown(result))
+    if not diagnostics["errors"]:
+        write_json(cache_path, result)
     return result

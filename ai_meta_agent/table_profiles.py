@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter, deque
 from pathlib import Path
 from typing import Any
 
 from openpyxl import load_workbook
 
+from .io_utils import read_json, write_json
 from .models import Manifest, SchemaBundle, TableSchema, resolve_path
 
 PROFILE_SCAN_LIMIT = 5000
@@ -15,6 +18,7 @@ SAMPLE_VALUE_LIMIT = 8
 ENUM_VALUE_LIMIT = 12
 PROFILE_FIELD_LIMIT = 80
 ACTIVITY_REGULAR_ID_LIMIT = 100000
+PROFILE_CACHE_VERSION = 1
 
 REFERENCE_KEYWORDS = (
     "id",
@@ -73,6 +77,7 @@ def build_target_table_profiles(
     """
     dictionary_index = _dictionary_index(field_dictionary or [])
     profiles: dict[str, Any] = {}
+    cache_root = _profile_cache_root(base_dir)
     for table_name, table in schema.tables.items():
         ref = manifest.config_tables.get(table_name)
         if not ref:
@@ -80,18 +85,83 @@ def build_target_table_profiles(
         path = resolve_path(base_dir, ref.path)
         if not path.exists():
             continue
+        sheet_name = ref.sheet or table.sheet or table_name
+        cache_path = _profile_cache_path(cache_root, path, sheet_name, table_name, table, dictionary_index, max_rows)
+        cached_profile = _read_cached_profile(cache_path)
+        if cached_profile is not None:
+            profiles[table_name] = cached_profile
+            continue
         try:
             profiles[table_name] = _profile_table(
                 path,
-                ref.sheet or table.sheet or table_name,
+                sheet_name,
                 table_name,
                 table,
                 dictionary_index,
                 max_rows,
             )
+            if not profiles[table_name].get("error"):
+                write_json(cache_path, profiles[table_name])
         except Exception as exc:  # noqa: BLE001 - profiles are advisory context only.
-            profiles[table_name] = {"path": str(path), "sheet": ref.sheet or table.sheet or table_name, "error": str(exc)}
+            profiles[table_name] = {"path": str(path), "sheet": sheet_name, "error": str(exc)}
     return profiles
+
+
+def _profile_cache_root(base_dir: Path) -> Path:
+    return base_dir / ".runs" / "cache" / "table-profiles"
+
+
+def _profile_cache_path(
+    cache_root: Path,
+    path: Path,
+    sheet_name: str,
+    table_name: str,
+    table: TableSchema,
+    dictionary_index: dict[tuple[str, str], dict[str, Any]],
+    max_rows: int,
+) -> Path:
+    stat = path.stat()
+    dictionary_entries = [
+        _cache_dictionary_entry(field, entry)
+        for (current_table, field), entry in sorted(dictionary_index.items())
+        if current_table == table_name
+    ]
+    material = {
+        "version": PROFILE_CACHE_VERSION,
+        "path": str(path.resolve()),
+        "mtime_ns": stat.st_mtime_ns,
+        "size": stat.st_size,
+        "sheet": sheet_name,
+        "table": table_name,
+        "max_rows": max_rows,
+        "primary_key": table.primary_key,
+        "group_key": table.group_key,
+        "fields": list(table.fields.keys()),
+        "dictionary": dictionary_entries,
+    }
+    digest = hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return cache_root / f"{digest}.json"
+
+
+def _cache_dictionary_entry(field: str, entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "field": field,
+        "id_strategy": entry.get("id_strategy"),
+        "reference_table": entry.get("reference_table"),
+        "risk_note": entry.get("risk_note"),
+        "writable": entry.get("writable"),
+        "enabled": entry.get("enabled", True),
+    }
+
+
+def _read_cached_profile(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        cached = read_json(path)
+    except Exception:  # noqa: BLE001 - stale or partial caches should never block a draft.
+        return None
+    return cached if isinstance(cached, dict) else None
 
 
 def _profile_table(
