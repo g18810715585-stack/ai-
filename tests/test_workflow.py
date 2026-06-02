@@ -269,7 +269,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(preview_sheet.cell(4, 12).value, "10001")
             self.assertEqual(preview_sheet.cell(4, 13).value, "3")
 
-    def test_inserted_rows_inherit_column_font_size_and_alignment_without_grid_changes(self) -> None:
+    def test_inserted_rows_write_values_only_without_changing_grid_rules(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             styled = tmp / "styled.xlsx"
@@ -288,7 +288,7 @@ class WorkflowTests(unittest.TestCase):
                 sheet.cell(row_idx, 1).alignment = Alignment(horizontal="center", vertical="center")
                 sheet.cell(row_idx, 1).border = existing_border
                 sheet.cell(row_idx, 2).value = f"item-{row_idx}"
-                sheet.cell(row_idx, 2).font = Font(name="Calibri", sz=11)
+                sheet.cell(row_idx, 2).font = Font(name="Courier New", sz=13)
                 sheet.cell(row_idx, 2).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
                 sheet.cell(row_idx, 2).border = existing_border
             sheet.cell(6, 1).font = Font(name="Times New Roman", sz=12)
@@ -338,14 +338,13 @@ class WorkflowTests(unittest.TestCase):
             id_cell = preview_sheet.cell(7, 1)
             name_cell = preview_sheet.cell(7, 2)
             self.assertFalse(preview_sheet.sheet_view.showGridLines)
-            self.assertEqual(id_cell.font.name, "Arial")
-            self.assertEqual(id_cell.font.sz, 9)
-            self.assertEqual(id_cell.alignment.horizontal, "center")
-            self.assertEqual(id_cell.alignment.vertical, "center")
-            self.assertEqual(name_cell.font.name, "Calibri")
-            self.assertEqual(name_cell.font.sz, 11)
-            self.assertEqual(name_cell.alignment.horizontal, "left")
-            self.assertTrue(name_cell.alignment.wrap_text)
+            self.assertEqual(id_cell.value, 4)
+            self.assertEqual(name_cell.value, "new item")
+            self.assertNotEqual(id_cell.font.name, "Arial")
+            self.assertIsNone(id_cell.alignment.horizontal)
+            self.assertNotEqual(name_cell.font.name, "Courier New")
+            self.assertIsNone(name_cell.alignment.horizontal)
+            self.assertIsNone(name_cell.alignment.wrap_text)
             self.assertEqual(preview_sheet.cell(4, 1).border.left.style, "thin")
             self.assertIsNone(id_cell.border.left.style)
 
