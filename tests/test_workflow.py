@@ -191,6 +191,83 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(validation["errors"], [])
             self.assertTrue(result["rollback_patch"]["operations"])
 
+    def test_apply_uses_second_header_row_for_machine_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            reward = tmp / "reward.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "reward"
+            display_headers = ["池id", "池名称", "奖励类型", "抽取类型", "抽取次数", "英雄限制", "等级限制", "大本系数", "是否触发借贷补偿", "备注", "类型", "内容", "数量"]
+            field_headers = ["id", None, "type", "is_removal", "num", "hero_limit", "level_limit", "building_ratio", "is_repay", None, "type_1", "reward_1", "num_1"]
+            type_headers = ["int", None, "int", "int", "int", "int", "int", "int", "int", None, "int", "string", "string"]
+            for col, value in enumerate(display_headers, start=1):
+                sheet.cell(1, col).value = value
+            for col, value in enumerate(field_headers, start=1):
+                sheet.cell(2, col).value = value
+            for col, value in enumerate(type_headers, start=1):
+                sheet.cell(3, col).value = value
+            workbook.save(reward)
+
+            manifest = Manifest.model_validate(
+                {
+                    "project": "reward-header-test",
+                    "mode": "supervised_write",
+                    "schema_path": "",
+                    "planning_sources": [],
+                    "config_tables": {"reward": {"path": str(reward), "sheet": "reward"}},
+                }
+            )
+            schema = SchemaBundle.model_validate(
+                {
+                    "version": 1,
+                    "tables": {
+                        "reward": {
+                            "sheet": "reward",
+                            "primary_key": ["id"],
+                            "fields": {
+                                "id": {"type": "int", "required": True},
+                                "type": {"type": "int"},
+                                "is_removal": {"type": "int"},
+                                "num": {"type": "int"},
+                                "type_1": {"type": "int"},
+                                "reward_1": {"type": "str"},
+                                "num_1": {"type": "str"},
+                            },
+                        }
+                    },
+                }
+            )
+            patch_obj = Patch.model_validate(
+                {
+                    "patch_id": "reward-header-row",
+                    "project": "reward-header-test",
+                    "operations": [
+                        {
+                            "op": "insert",
+                            "target_table": "reward",
+                            "rows": [{"id": 605300001, "type": 4, "is_removal": 0, "num": 1, "type_1": 999, "reward_1": "10001", "num_1": "3"}],
+                            "reason": "unit test",
+                            "confidence": 1,
+                            "risk_level": "low",
+                            "needs_confirmation": False,
+                        }
+                    ],
+                }
+            )
+
+            apply_dir = tmp / ".runs" / "apply-reward-header"
+            result = apply_patch(manifest, schema, patch_obj, tmp, apply_dir)
+            preview = Path(next(iter(result["previews"].values())))
+            preview_sheet = load_workbook(preview, data_only=True)["reward"]
+            self.assertEqual(preview_sheet.max_column, len(display_headers))
+            self.assertEqual(preview_sheet.cell(4, 1).value, 605300001)
+            self.assertEqual(preview_sheet.cell(4, 3).value, 4)
+            self.assertEqual(preview_sheet.cell(4, 4).value, 0)
+            self.assertEqual(preview_sheet.cell(4, 11).value, 999)
+            self.assertEqual(preview_sheet.cell(4, 12).value, "10001")
+            self.assertEqual(preview_sheet.cell(4, 13).value, "3")
+
     def test_habit_learning_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)

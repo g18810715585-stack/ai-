@@ -17,16 +17,44 @@ class WorkbookState:
     workbook: Workbook
 
 
+HEADER_SCAN_ROWS = 3
+
+
 def _headers(sheet: Any) -> list[str]:
     return list(_header_index(sheet).keys())
 
 
+def _header_rows(sheet: Any) -> list[int]:
+    max_row = min(sheet.max_row or 1, HEADER_SCAN_ROWS)
+    rows = list(range(1, max_row + 1))
+    # Many production config sheets use row 1 for Chinese labels, row 2 for
+    # machine field names, and row 3 for types. Prefer row 2 so patch fields
+    # like `id` and `reward_1` bind to existing columns instead of new ones.
+    if 2 in rows:
+        return [2, 1, *[row for row in rows if row not in {1, 2}]]
+    return rows
+
+
+def _field_header_row(sheet: Any) -> int:
+    for row_idx in _header_rows(sheet):
+        values = [
+            str(sheet.cell(row_idx, col).value).strip()
+            for col in range(1, sheet.max_column + 1)
+            if sheet.cell(row_idx, col).value not in (None, "")
+        ]
+        machine_like = sum(1 for value in values if value.replace("_", "").replace("-", "").isascii())
+        if values and machine_like >= max(1, len(values) // 2):
+            return row_idx
+    return 1
+
+
 def _header_index(sheet: Any) -> dict[str, int]:
     index: dict[str, int] = {}
-    for col in range(1, sheet.max_column + 1):
-        value = sheet.cell(1, col).value
-        if value not in (None, ""):
-            index[str(value)] = col
+    for row_idx in _header_rows(sheet):
+        for col in range(1, sheet.max_column + 1):
+            value = sheet.cell(row_idx, col).value
+            if value not in (None, ""):
+                index.setdefault(str(value).strip(), col)
     return index
 
 
@@ -43,9 +71,10 @@ def _ensure_sheet(workbook: Workbook, sheet_name: str, fields: list[str]) -> Any
             index[field] = col
     else:
         next_col = max(index.values(), default=0) + 1
+        header_row = _field_header_row(sheet)
         for field in fields:
             if field not in index:
-                sheet.cell(1, next_col).value = field
+                sheet.cell(header_row, next_col).value = field
                 index[field] = next_col
                 next_col += 1
     return sheet
@@ -80,9 +109,10 @@ def _find_rows(sheet: Any, match: dict[str, Any], index: dict[str, int] | None =
 def _write_row(sheet: Any, row_idx: int, row: dict[str, Any], index: dict[str, int] | None = None) -> dict[str, int]:
     current_index = index if index is not None else _header_index(sheet)
     next_col = max(current_index.values(), default=0) + 1
+    header_row = _field_header_row(sheet)
     for field, value in row.items():
         if field not in current_index:
-            sheet.cell(1, next_col).value = field
+            sheet.cell(header_row, next_col).value = field
             current_index[field] = next_col
             next_col += 1
         sheet.cell(row_idx, current_index[field]).value = value
