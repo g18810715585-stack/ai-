@@ -1833,6 +1833,7 @@ class WorkflowTests(unittest.TestCase):
 
         self.assertEqual([item["body"]["model"] for item in captured], list(providers.values()))
         self.assertTrue(all(item["url"] == "https://baseai.rivergame.net/v1/chat/completions" for item in captured))
+        self.assertTrue(all(item["body"]["max_tokens"] == 7000 for item in captured))
         self.assertIn("temperature", captured[0]["body"])
         self.assertIn("temperature", captured[1]["body"])
         self.assertNotIn("temperature", captured[2]["body"])
@@ -1894,9 +1895,67 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(generated.patch_id, "patch_deepseek")
         self.assertEqual(captured["url"], "https://baseai.rivergame.net/v1/chat/completions")
         self.assertEqual(captured["body"]["model"], "deepseek-v4-pro")
+        self.assertEqual(captured["body"]["max_tokens"], 7000)
         self.assertNotIn("thinking", captured["body"])
         self.assertEqual(captured["body"]["response_format"], {"type": "json_object"})
         self.assertEqual(captured["authorization"], "Bearer unit-key")
+
+    def test_ai_generation_budget_can_be_overridden_per_provider(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "project": "deepseek-budget-sample",
+                "mode": "supervised_write",
+                "schema_path": str(ROOT / "config" / "example.schema.json"),
+                "planning_sources": [{"id": "plan", "kind": "local_excel", "path": "dummy.xlsx", "role": "planning"}],
+                "ai": {"provider": "deepseek_v4_pro"},
+            }
+        )
+        response_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "patch_id": "patch_budget",
+                                "project": "deepseek-budget-sample",
+                                "mode": "supervised_write",
+                                "operations": [],
+                                "generated_by": "ai-meta-agent",
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(response_payload).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        env = {
+            "BASEAI_API_KEY": "unit-key",
+            "AI_MAX_OUTPUT_TOKENS": "9000",
+            "DEEPSEEK_MAX_OUTPUT_TOKENS": "4321",
+            "DEEPSEEK_REASONING_EFFORT": "low",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                generated = call_baseai(manifest, {"project": "deepseek-budget-sample"})
+
+        self.assertEqual(generated.patch_id, "patch_budget")
+        self.assertEqual(captured["body"]["max_tokens"], 4321)
+        self.assertEqual(captured["body"]["reasoning_effort"], "low")
 
     def test_deepseek_provider_requires_company_bi_key(self) -> None:
         manifest = Manifest.model_validate(

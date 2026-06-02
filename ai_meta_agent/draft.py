@@ -16,6 +16,7 @@ from .io_utils import write_json, write_text
 from .models import Manifest, Patch, PatchOperation, SchemaBundle, SourceRef
 
 DEFAULT_AI_TIMEOUT_SECONDS = 240
+DEFAULT_AI_MAX_OUTPUT_TOKENS = 7000
 
 AI_PROVIDERS = {
     "chatgpt": {
@@ -25,6 +26,8 @@ AI_PROVIDERS = {
         "model_env": "CHATGPT_MODEL",
         "default_base_url": "https://baseai.rivergame.net/v1",
         "default_model": "gpt-5.5",
+        "max_tokens_env": "CHATGPT_MAX_OUTPUT_TOKENS",
+        "reasoning_effort_env": "CHATGPT_REASONING_EFFORT",
         "extra_body": {},
         "temperature": 0.1,
     },
@@ -35,6 +38,8 @@ AI_PROVIDERS = {
         "model_env": "GEMINI_MODEL",
         "default_base_url": "https://baseai.rivergame.net/v1",
         "default_model": "gemini-3.1-pro-preview",
+        "max_tokens_env": "GEMINI_MAX_OUTPUT_TOKENS",
+        "reasoning_effort_env": "GEMINI_REASONING_EFFORT",
         "extra_body": {},
         "temperature": 0.1,
     },
@@ -45,6 +50,8 @@ AI_PROVIDERS = {
         "model_env": "CLAUDE_MODEL",
         "default_base_url": "https://baseai.rivergame.net/v1",
         "default_model": "claude-opus-4-8",
+        "max_tokens_env": "CLAUDE_MAX_OUTPUT_TOKENS",
+        "reasoning_effort_env": "CLAUDE_REASONING_EFFORT",
         "extra_body": {},
         "temperature": None,
     },
@@ -55,6 +62,8 @@ AI_PROVIDERS = {
         "model_env": "DEEPSEEK_MODEL",
         "default_base_url": "https://baseai.rivergame.net/v1",
         "default_model": "deepseek-v4-pro",
+        "max_tokens_env": "DEEPSEEK_MAX_OUTPUT_TOKENS",
+        "reasoning_effort_env": "DEEPSEEK_REASONING_EFFORT",
         "extra_body": {},
         "temperature": 0.1,
     },
@@ -201,6 +210,41 @@ def _resolve_ai_runtime(manifest: Manifest) -> dict[str, Any]:
     return provider | {"id": provider_id}
 
 
+def _first_env(*names: str | None) -> str | None:
+    for name in names:
+        if not name:
+            continue
+        value = os.environ.get(name)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _int_env(*names: str | None, default: int) -> int:
+    value = _first_env(*names)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        joined = ", ".join(name for name in names if name)
+        raise RuntimeError(f"Invalid integer value for {joined}: {value}") from exc
+    return parsed
+
+
+def _apply_ai_generation_budget(body: dict[str, Any], runtime: dict[str, Any]) -> dict[str, Any]:
+    max_tokens = _int_env(runtime.get("max_tokens_env"), "AI_MAX_OUTPUT_TOKENS", default=DEFAULT_AI_MAX_OUTPUT_TOKENS)
+    if max_tokens > 0 and "max_tokens" not in body:
+        body["max_tokens"] = max_tokens
+    reasoning_effort = _first_env(runtime.get("reasoning_effort_env"), "AI_REASONING_EFFORT")
+    if reasoning_effort and "reasoning_effort" not in body:
+        body["reasoning_effort"] = reasoning_effort
+    return {
+        "max_tokens": body.get("max_tokens"),
+        "reasoning_effort": body.get("reasoning_effort"),
+    }
+
+
 def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: Path | None = None) -> Patch:
     runtime = _resolve_ai_runtime(manifest)
     api_key = os.environ.get(runtime["api_key_env"])
@@ -219,6 +263,9 @@ def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: 
                     "The JSON must match this Patch shape: patch_id, project, mode, operations, generated_by. "
                     "Each operation must include op, target_table, source_ref, reason, confidence, risk_level, "
                     "needs_confirmation, and the required match/set/rows fields for the op. "
+                    "Do not include chain-of-thought, analysis, planning prose, commentary, or implementation notes. "
+                    "The response must be compact JSON only; no pretty-printing is required. "
+                    "Keep every reason under 80 Chinese characters and every source_ref text field under 80 characters. "
                     "Allowed op values are exactly insert, update, delete_where, replace_group; use insert with rows "
                     "for one or many new rows, never insert_rows and never insert+set. "
                     "Use only target tables and fields from schema. Treat run_instruction as the highest-priority "
@@ -248,6 +295,7 @@ def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: 
     }
     if runtime["temperature"] is not None:
         body["temperature"] = runtime["temperature"]
+    generation_budget = _apply_ai_generation_budget(body, runtime)
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
@@ -282,6 +330,7 @@ def call_baseai(manifest: Manifest, context: dict[str, Any], raw_response_path: 
                     "request_context_kb": round(request_bytes / 1024, 1),
                     "estimated_prompt_tokens": round(request_bytes / 4),
                 },
+                "request_params": generation_budget,
                 "response": payload,
             },
         )
